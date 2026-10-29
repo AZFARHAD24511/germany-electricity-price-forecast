@@ -1,0 +1,26 @@
+{
+  "external_shift_hours": 24,
+  "protocol": "conservative",
+  "n_rows_joined": 42168,
+  "windows": [
+    {
+      "window": 1,
+      "start": "2026-07-27",
+      "end": "2026-08-25 23:00",
+      "n_test": 720
+    },
+    {
+      "window": 2,
+      "start": "2026-08-26",
+      "end": "2026-09-24 23:00",
+      "n_test": 720
+    },
+    {
+      "window": 3,
+      "start": "2026-09-25",
+      "end": "2026-10-23 23:00",
+      "n_test": 696
+    }
+  ],
+  "weighted_mae_ensemble": 26.47436542383008
+}
