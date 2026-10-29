@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "germany-electricity-price-forecast"
+version = "0.1.0"
+description = "Leakage-aware day-ahead electricity price forecasting for Germany (EPEX Spot)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+  { name = "Azizallah Farhadi", email = "farhadmy1974@gmail.com" }
+]
+dependencies = [
+  "pandas>=2.0",
+  "numpy>=1.24",
+  "scikit-learn>=1.3",
+  "matplotlib>=3.7",
+  "seaborn>=0.13",
+  "requests>=2.31",
+  "pyyaml>=6.0",
+  "joblib>=1.3",
+  "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
