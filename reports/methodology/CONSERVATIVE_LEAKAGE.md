@@ -22,18 +22,26 @@ On 29 October 2026 we received the following response from the official SMARD te
 
 ## 2. Chosen Leakage-Control Strategy: Conservative (24 h lag)
 
-Because the true issue time of the SMARD day-ahead wind/solar forecasts is unknown, we adopt a **strictly conservative** protocol:
+According to the official *SMARD.de User guide* (September 2021), TSOs must transmit day-ahead wind and solar generation forecasts to the ENTSO-E Transparency Platform **no later than 18:00 on the day before** (Art. 14(1)(d) of Regulation (EU) No 543/2013). Forecasted consumption must be submitted no later than two hours before day-ahead gate closure. All times on SMARD are in CET/CEST.
+
+However, the guide only states the legal submission deadline to ENTSO-E. It does **not** document:
+
+- when the data actually appear on SMARD,
+- a recoverable historical issue timestamp, or
+- a fixed revision schedule (historical series may be updated later).
+
+In addition, the chart-data endpoint used to download the series is **not an official Bundesnetzagentur API**, so fields such as `meta_data.created` cannot be treated as original publication times.
+
+Because the true issue time remains unknown, we adopt a **strictly conservative** protocol:
 
 | Feature group              | Availability rule                                      | Rationale |
-|---------------------------|--------------------------------------------------------|---------|
-| Price lags, rolling stats | Only values up to the end of day D-1                   | Always known |
-| Calendar features         | Deterministic                                          | Always known |
-| SMARD wind/solar forecasts| Shifted by **+24 hours** (use D-1 forecast for day D) | Avoids any chance of using information published after the day-ahead auction |
-| Weather archive           | Same 24 h shift                                        | Same reason |
+|----------------------------|--------------------------------------------------------|-----------|
+| Price lags, rolling stats  | Only values up to the end of day D−1                   | Always known |
+| Calendar features          | Deterministic                                          | Always known |
+| SMARD wind/solar forecasts | Shifted by **+24 hours** (use D−1 forecast for day D)  | Avoids any chance of using information published after the day-ahead auction |
+| Weather archive            | Same 24 h shift                                        | Same reason |
 
-This rule guarantees that **no information that could have become available only after the day-ahead market closed** enters the feature set.
-
----
+This rule guarantees that **no information that could have become available only after the day-ahead market closed** enters the feature set. All primary results in this study refer exclusively to this protocol.
 
 ## 3. Reported Performance (Conservative Protocol Only)
 
