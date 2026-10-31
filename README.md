@@ -190,3 +190,57 @@ If you use this code or results, please cite the repository and note the Conserv
 Data attribution for SMARD-sourced series: *Bundesnetzagentur | SMARD.de* (even though the chart-data endpoint itself is third-party).
 
 Licence: MIT (code). Underlying market data remain subject to their original licences.
+
+<!-- DAILY_FORECAST_START -->
+
+## Live daily forecast
+
+**Generated (UTC):** 2026-10-31 15:18  
+**Based on data up to (UTC):** 2026-10-25 03:00  
+**Forecast horizon (UTC):** 2026-10-25 04:00 to 2026-10-26 03:00  
+**Protocol:** Conservative (external_shift = 24)
+
+### Forecast chart
+
+![Daily forecast](outputs/figures/latest_forecast.png)
+
+### Forecast table (EUR/MWh)
+
+| Hour (UTC) | Forecast (EUR/MWh) |
+|------------|--------------------|
+| 2026-10-25 04:00 | 170.65 |
+| 2026-10-25 05:00 | 201.57 |
+| 2026-10-25 06:00 | 212.34 |
+| 2026-10-25 07:00 | 195.53 |
+| 2026-10-25 08:00 | 170.77 |
+| 2026-10-25 09:00 | 143.29 |
+| 2026-10-25 10:00 | 128.01 |
+| 2026-10-25 11:00 | 120.50 |
+| 2026-10-25 12:00 | 125.40 |
+| 2026-10-25 13:00 | 140.66 |
+| 2026-10-25 14:00 | 164.97 |
+| 2026-10-25 15:00 | 200.96 |
+| 2026-10-25 16:00 | 228.26 |
+| 2026-10-25 17:00 | 232.21 |
+| 2026-10-25 18:00 | 211.69 |
+| 2026-10-25 19:00 | 193.88 |
+| 2026-10-25 20:00 | 181.48 |
+| 2026-10-25 21:00 | 164.62 |
+| 2026-10-25 22:00 | 156.29 |
+| 2026-10-25 23:00 | 150.35 |
+| 2026-10-26 00:00 | 143.86 |
+| 2026-10-26 01:00 | 143.07 |
+| 2026-10-26 02:00 | 142.87 |
+| 2026-10-26 03:00 | 146.31 |
+
+### Previous forecasts vs realized prices
+
+| Forecast file | Hours scored | MAE | RMSE |
+|---------------|--------------|-----|------|
+| `forecast_2026-10-31.csv` | 24 | 151.38 | 153.84 |
+
+![Forecast vs actual](outputs/figures/latest_vs_actual.png)
+
+_If the vs-actual chart is missing, there is not yet enough overlap with realized prices._
+
+<!-- DAILY_FORECAST_END -->
