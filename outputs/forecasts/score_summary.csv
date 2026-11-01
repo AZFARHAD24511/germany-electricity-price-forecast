@@ -1,2 +1,2 @@
 forecast_file,n_hours_scored,mae,rmse
-forecast_2026-10-31.csv,10,62.6,68.42
+forecast_2026-10-31.csv,12,67.47,72.87

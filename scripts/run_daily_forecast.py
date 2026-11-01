@@ -13,9 +13,11 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from electricity_forecast.features import make_features
 from electricity_forecast.train import fit_ensemble, predict_ensemble
+from bias_correction import collect_errors, hourly_bias, apply_bias_correction
 
 RAW = ROOT / "data" / "raw"
 OUT_DIR = ROOT / "outputs" / "forecasts"
@@ -38,12 +40,10 @@ def update_data() -> None:
 
 
 def load_frame() -> pd.DataFrame:
-    # Price (required)
     p = pd.read_csv(PRICE)
     p["ts"] = pd.to_datetime(p["timestamp_utc"], utc=True)
     price = p.set_index("ts").sort_index()[["price_eur_mwh"]].astype(float)
 
-    # SMARD (optional columns)
     sm = pd.read_csv(SMARD)
     sm["ts"] = pd.to_datetime(sm["timestamp_utc"], utc=True)
     sm = sm.set_index("ts").sort_index()
@@ -53,7 +53,6 @@ def load_frame() -> pd.DataFrame:
     ] if c in sm.columns]
     sm = sm[sm_cols]
 
-    # Weather (optional) — left join so missing recent weather does not cut the series
     if WEATHER.exists():
         w = pd.read_csv(WEATHER)
         w["ts"] = pd.to_datetime(w["timestamp_utc"], utc=True)
@@ -98,7 +97,7 @@ def make_forecast(df: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
 def plot_forecast(forecast: pd.DataFrame, path: Path) -> None:
     fig, ax = plt.subplots(figsize=(11, 4))
     ax.plot(forecast["timestamp_utc"], forecast["yhat_eur_mwh"], marker="o", lw=1.5, color="#245B7A")
-    ax.set_title("Day-ahead price forecast (EUR/MWh)")
+    ax.set_title("Day-ahead price forecast (EUR/MWh) with bias correction")
     ax.set_ylabel("EUR/MWh")
     ax.grid(True, alpha=0.3)
     fig.autofmt_xdate()
@@ -150,10 +149,12 @@ def score_past(price_csv: Path) -> pd.DataFrame:
 
 
 def forecast_table_md(forecast: pd.DataFrame) -> str:
-    lines = ["| Hour (UTC) | Forecast (EUR/MWh) |", "|------------|--------------------|"]
+    lines = ["| Hour (UTC) | Forecast (EUR/MWh) | Bias |",
+             "|------------|--------------------|------|"]
     for _, r in forecast.iterrows():
         h = pd.to_datetime(r["timestamp_utc"], utc=True).strftime("%Y-%m-%d %H:%M")
-        lines.append(f"| {h} | {r['yhat_eur_mwh']:.2f} |")
+        bias = r["bias_applied"] if "bias_applied" in forecast.columns else 0.0
+        lines.append(f"| {h} | {r['yhat_eur_mwh']:.2f} | {bias:.2f} |")
     return "\n".join(lines)
 
 
@@ -163,7 +164,9 @@ def score_table_md(score: pd.DataFrame) -> str:
     lines = ["| Forecast file | Hours scored | MAE | RMSE |",
              "|---------------|--------------|-----|------|"]
     for _, r in score.iterrows():
-        lines.append(f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | {r['rmse']:.2f} |")
+        lines.append(
+            f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | {r['rmse']:.2f} |"
+        )
     return "\n".join(lines)
 
 
@@ -178,7 +181,7 @@ def update_readme(forecast: pd.DataFrame, score: pd.DataFrame, now: pd.Timestamp
 **Generated (UTC):** {now.strftime('%Y-%m-%d %H:%M')}  
 **Based on data up to (UTC):** {basis.strftime('%Y-%m-%d %H:%M')}  
 **Forecast horizon (UTC):** {f0.strftime('%Y-%m-%d %H:%M')} to {f1.strftime('%Y-%m-%d %H:%M')}  
-**Protocol:** Conservative (external_shift = 24)
+**Protocol:** Conservative (external_shift = 24) + hourly bias correction
 
 ### Forecast chart
 
@@ -212,19 +215,31 @@ def main() -> None:
     update_data()
     df = load_frame()
     print(f"Joined rows={len(df)} last={df.index.max()}")
+
     forecast = make_forecast(df, now)
+
+    # Bias correction (only past errors)
+    price_s = df["price_eur_mwh"]
+    errors = collect_errors(price_s)
+    bias = hourly_bias(errors, min_obs=2, last_n_days=14)
+    forecast = apply_bias_correction(forecast, bias)
+    print("Bias hours available:", list(bias.index) if len(bias) else "none yet")
+
     out_csv = OUT_DIR / f"forecast_{now.strftime('%Y-%m-%d')}.csv"
     forecast.to_csv(out_csv, index=False)
     print(forecast[["timestamp_utc", "yhat_eur_mwh"]].to_string(index=False))
     print("Saved ->", out_csv)
+
     plot_forecast(forecast, FIG_DIR / "latest_forecast.png")
     print("Saved ->", FIG_DIR / "latest_forecast.png")
+
     score = score_past(PRICE)
     if not score.empty:
         score.to_csv(OUT_DIR / "score_summary.csv", index=False)
         print(score.to_string(index=False))
     else:
         print("No scored forecasts yet")
+
     update_readme(forecast, score, now)
     print("DONE")
 
