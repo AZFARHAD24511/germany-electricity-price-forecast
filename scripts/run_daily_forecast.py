@@ -33,6 +33,14 @@ MARKER_START = "<!-- DAILY_FORECAST_START -->"
 MARKER_END = "<!-- DAILY_FORECAST_END -->"
 
 
+def rotate_x_labels(ax) -> None:
+    for label in ax.get_xticklabels():
+        label.set_rotation(90)
+        label.set_ha("center")
+        label.set_fontsize(8)
+    ax.tick_params(axis="x", which="major", pad=2)
+
+
 def update_data() -> None:
     script = ROOT / "scripts" / "update_data.py"
     print("Running update_data.py ...")
@@ -47,10 +55,16 @@ def load_frame() -> pd.DataFrame:
     sm = pd.read_csv(SMARD)
     sm["ts"] = pd.to_datetime(sm["timestamp_utc"], utc=True)
     sm = sm.set_index("ts").sort_index()
-    sm_cols = [c for c in [
-        "forecast_wind_solar_combined", "forecast_wind_offshore",
-        "forecast_wind_onshore", "forecast_solar"
-    ] if c in sm.columns]
+    sm_cols = [
+        c
+        for c in [
+            "forecast_wind_solar_combined",
+            "forecast_wind_offshore",
+            "forecast_wind_onshore",
+            "forecast_solar",
+        ]
+        if c in sm.columns
+    ]
     sm = sm[sm_cols]
 
     if WEATHER.exists():
@@ -85,22 +99,30 @@ def make_forecast(df: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
     for ts in future:
         mask = recent.index.hour == ts.hour
         yhat = float(np.mean(pred_recent[mask])) if mask.any() else float(pred_recent[-1])
-        rows.append({
-            "timestamp_utc": ts,
-            "yhat_eur_mwh": round(yhat, 2),
-            "run_time_utc": now,
-            "basis_last_data_utc": last,
-        })
+        rows.append(
+            {
+                "timestamp_utc": ts,
+                "yhat_eur_mwh": round(yhat, 2),
+                "run_time_utc": now,
+                "basis_last_data_utc": last,
+            }
+        )
     return pd.DataFrame(rows)
 
 
 def plot_forecast(forecast: pd.DataFrame, path: Path) -> None:
-    fig, ax = plt.subplots(figsize=(11, 4))
-    ax.plot(forecast["timestamp_utc"], forecast["yhat_eur_mwh"], marker="o", lw=1.5, color="#245B7A")
+    fig, ax = plt.subplots(figsize=(12, 5))
+    ax.plot(
+        forecast["timestamp_utc"],
+        forecast["yhat_eur_mwh"],
+        marker="o",
+        lw=1.5,
+        color="#245B7A",
+    )
     ax.set_title("Day-ahead price forecast (EUR/MWh) with bias correction")
     ax.set_ylabel("EUR/MWh")
     ax.grid(True, alpha=0.3)
-    fig.autofmt_xdate()
+    rotate_x_labels(ax)
     fig.tight_layout()
     fig.savefig(path, dpi=140, bbox_inches="tight")
     plt.close(fig)
@@ -125,23 +147,31 @@ def score_past(price_csv: Path) -> pd.DataFrame:
         pred = fc.loc[common, "yhat_eur_mwh"]
         mae = float(np.mean(np.abs(y - pred)))
         rmse = float(np.sqrt(np.mean((y - pred) ** 2)))
-        rows.append({
-            "forecast_file": fpath.name,
-            "n_hours_scored": int(len(common)),
-            "mae": round(mae, 2),
-            "rmse": round(rmse, 2),
-        })
+        rows.append(
+            {
+                "forecast_file": fpath.name,
+                "n_hours_scored": int(len(common)),
+                "mae": round(mae, 2),
+                "rmse": round(rmse, 2),
+            }
+        )
         detail = pd.DataFrame({"actual": y, "forecast": pred}).sort_index()
         last_detail, last_mae, last_name = detail, mae, fpath.name
+
     if last_detail is not None:
-        fig, ax = plt.subplots(figsize=(11, 4))
+        fig, ax = plt.subplots(figsize=(12, 5))
         ax.plot(last_detail.index, last_detail["actual"], label="Actual", color="#17324D")
-        ax.plot(last_detail.index, last_detail["forecast"], label="Forecast", color="#C45C26")
+        ax.plot(
+            last_detail.index,
+            last_detail["forecast"],
+            label="Forecast",
+            color="#C45C26",
+        )
         ax.set_title(f"Forecast vs actual - {last_name} (MAE={last_mae:.1f})")
         ax.set_ylabel("EUR/MWh")
         ax.legend(frameon=False)
         ax.grid(True, alpha=0.3)
-        fig.autofmt_xdate()
+        rotate_x_labels(ax)
         fig.tight_layout()
         fig.savefig(FIG_DIR / "latest_vs_actual.png", dpi=140, bbox_inches="tight")
         plt.close(fig)
@@ -149,8 +179,10 @@ def score_past(price_csv: Path) -> pd.DataFrame:
 
 
 def forecast_table_md(forecast: pd.DataFrame) -> str:
-    lines = ["| Hour (UTC) | Forecast (EUR/MWh) | Bias |",
-             "|------------|--------------------|------|"]
+    lines = [
+        "| Hour (UTC) | Forecast (EUR/MWh) | Bias |",
+        "|------------|--------------------|------|",
+    ]
     for _, r in forecast.iterrows():
         h = pd.to_datetime(r["timestamp_utc"], utc=True).strftime("%Y-%m-%d %H:%M")
         bias = r["bias_applied"] if "bias_applied" in forecast.columns else 0.0
@@ -161,8 +193,10 @@ def forecast_table_md(forecast: pd.DataFrame) -> str:
 def score_table_md(score: pd.DataFrame) -> str:
     if score.empty:
         return "_No overlapping actual prices yet for previous forecasts._"
-    lines = ["| Forecast file | Hours scored | MAE | RMSE |",
-             "|---------------|--------------|-----|------|"]
+    lines = [
+        "| Forecast file | Hours scored | MAE | RMSE |",
+        "|---------------|--------------|-----|------|",
+    ]
     for _, r in score.iterrows():
         lines.append(
             f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | {r['rmse']:.2f} |"
@@ -218,7 +252,6 @@ def main() -> None:
 
     forecast = make_forecast(df, now)
 
-    # Bias correction (only past errors)
     price_s = df["price_eur_mwh"]
     errors = collect_errors(price_s)
     bias = hourly_bias(errors, min_obs=2, last_n_days=14)
