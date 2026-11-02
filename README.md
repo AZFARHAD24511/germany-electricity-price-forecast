@@ -195,7 +195,7 @@ Licence: MIT (code). Underlying market data remain subject to their original lic
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-02 23:00  
+**Generated (UTC):** 2026-11-02 23:02  
 **Based on data up to (UTC):** 2026-11-02 23:00  
 **Forecast horizon (UTC):** 2026-11-03 00:00 to 2026-11-03 23:00  
 **Protocol:** Conservative (external_shift = 24) + hourly bias correction
@@ -231,7 +231,7 @@ Licence: MIT (code). Underlying market data remain subject to their original lic
 | 2026-11-03 20:00 | 215.34 | 0.00 |
 | 2026-11-03 21:00 | 197.41 | 0.00 |
 | 2026-11-03 22:00 | 171.82 | 0.00 |
-| 2026-11-03 23:00 | 239.19 | -69.26 |
+| 2026-11-03 23:00 | 169.93 | 0.00 |
 
 ### Previous forecasts vs realized prices
 
