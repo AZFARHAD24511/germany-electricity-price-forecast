@@ -55,10 +55,22 @@ def make_features(
     X["roll_std_168"] = s.shift(1).rolling(168, min_periods=84).std()
 
     # External features with explicit shift
+    # Weather columns are treated as optional (do not force dropna on them)
+    required_external = [
+        'forecast_wind_solar_combined',
+        'forecast_wind_offshore',
+        'forecast_wind_onshore',
+        'forecast_solar',
+    ]
+    optional_external = ['avg_wind', 'avg_temp', 'avg_rad']
+
     for c in EXTERNAL_COLS:
         if c in df.columns:
             X[c] = df[c].shift(external_shift)
 
     y = s.copy()
-    valid = X.dropna().index.intersection(y.dropna().index)
+
+    # Only require price-related + SMARD features to be non-null
+    must_have = [c for c in X.columns if c not in optional_external]
+    valid = X[must_have].dropna().index.intersection(y.dropna().index)
     return X.loc[valid], y.loc[valid]

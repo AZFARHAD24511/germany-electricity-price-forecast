@@ -12,16 +12,25 @@ import seaborn as sns
 sns.set_theme(style="whitegrid", context="talk")
 
 
+def _rotate_time_axis(ax, rotation: int = 90) -> None:
+    for label in ax.get_xticklabels():
+        label.set_rotation(rotation)
+        label.set_ha("center")
+        label.set_fontsize(8)
+    ax.tick_params(axis="x", which="major", pad=2)
+
+
 def plot_price_overview(
     price: pd.Series,
     out_path: Path | str,
     title: str = "German Day-Ahead Electricity Price (EUR/MWh)",
 ) -> None:
-    fig, ax = plt.subplots(figsize=(12, 4))
+    fig, ax = plt.subplots(figsize=(12, 4.5))
     price.plot(ax=ax, lw=0.6, color="#245B7A")
     ax.set_title(title)
     ax.set_ylabel("EUR/MWh")
     ax.set_xlabel("")
+    _rotate_time_axis(ax, 90)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -32,7 +41,6 @@ def plot_backtest_mae(
     out_path: Path | str,
     title: str = "Backtest MAE by Window (Conservative Protocol)",
 ) -> None:
-    """Bar chart comparing SN24 / HGB / Ridge / Ensemble MAE."""
     metrics = ["mae_sn24", "mae_hgb", "mae_ridge", "mae_ens"]
     labels = ["Seasonal Naive 24h", "HistGradientBoosting", "Ridge", "Ensemble"]
     x = np.arange(len(summary))
@@ -64,12 +72,14 @@ def plot_prediction_vs_actual(
         y_true = y_true.loc[idx]
         y_pred = y_pred.loc[idx]
 
-    fig, ax = plt.subplots(figsize=(12, 4))
+    fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(y_true.index, y_true.values, label="Actual", lw=1.0, color="#17324D")
     ax.plot(y_pred.index, y_pred.values, label="Ensemble", lw=1.0, color="#C45C26", alpha=0.85)
     ax.set_title(title)
     ax.set_ylabel("EUR/MWh")
     ax.legend(frameon=False)
+    ax.grid(True, alpha=0.3)
+    _rotate_time_axis(ax, 90)
     fig.tight_layout()
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
