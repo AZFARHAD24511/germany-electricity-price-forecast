@@ -195,7 +195,7 @@ Licence: MIT (code). Underlying market data remain subject to their original lic
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-11 21:52  
+**Generated (UTC):** 2026-11-12 21:02  
 **Based on data up to (UTC):** 2026-11-12 22:00  
 **Forecast horizon (UTC):** 2026-11-12 23:00 to 2026-11-13 22:00  
 **Protocol:** Conservative (external_shift = 24) + hourly bias correction
