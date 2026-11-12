@@ -247,6 +247,19 @@ def main() -> None:
     now = pd.Timestamp.now(tz="UTC")
     print("START daily forecast", now)
     update_data()
+    print("\n--- DATA RANGES AFTER UPDATE ---")
+    for label, path in [
+        ("price", PRICE),
+        ("smard", SMARD),
+        ("weather", WEATHER),
+    ]:
+        if not path.exists():
+            print(label, "MISSING")
+            continue
+        d = pd.read_csv(path, usecols=["timestamp_utc"])
+        t = pd.to_datetime(d["timestamp_utc"], utc=True)
+        print(f"{label}: rows={len(d):,}  {t.min()} -> {t.max()}")
+    print("--- END DATA RANGES ---\n")
     df = load_frame()
     print(f"Joined rows={len(df)} last={df.index.max()}")
 
