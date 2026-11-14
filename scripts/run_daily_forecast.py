@@ -8,6 +8,7 @@ from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 import numpy as np
 import pandas as pd
 
@@ -15,9 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from electricity_forecast.features import make_features
-from electricity_forecast.train import fit_ensemble, predict_ensemble
 from bias_correction import collect_errors, hourly_bias, apply_bias_correction
+from forecast_horizon import recursive_forecast
 
 RAW = ROOT / "data" / "raw"
 OUT_DIR = ROOT / "outputs" / "forecasts"
@@ -45,6 +45,18 @@ def update_data() -> None:
     script = ROOT / "scripts" / "update_data.py"
     print("Running update_data.py ...")
     subprocess.run([sys.executable, str(script)], check=False)
+
+
+def print_data_ranges() -> None:
+    print("\n--- DATA RANGES AFTER UPDATE ---")
+    for label, path in [("price", PRICE), ("smard", SMARD), ("weather", WEATHER)]:
+        if not path.exists():
+            print(label, "MISSING")
+            continue
+        d = pd.read_csv(path, usecols=["timestamp_utc"])
+        t = pd.to_datetime(d["timestamp_utc"], utc=True)
+        print(f"{label}: rows={len(d):,}  {t.min()} -> {t.max()}")
+    print("--- END DATA RANGES ---\n")
 
 
 def load_frame() -> pd.DataFrame:
@@ -82,46 +94,23 @@ def load_frame() -> pd.DataFrame:
         weather = pd.DataFrame(columns=["avg_wind", "avg_temp", "avg_rad"])
 
     df = price.join(sm, how="left").join(weather, how="left")
-    df = df.ffill(limit=6)
+    df = df.ffill(limit=48)
     return df.dropna(subset=["price_eur_mwh"])
-
-
-def make_forecast(df: pd.DataFrame, now: pd.Timestamp) -> pd.DataFrame:
-    X, y = make_features(df, external_shift=24)
-    if len(X) < 500:
-        raise RuntimeError("Not enough rows after features")
-    models = fit_ensemble(X, y, hgb_weight=0.65)
-    last = y.index.max()
-    future = pd.date_range(last + pd.Timedelta(hours=1), periods=24, freq="h", tz="UTC")
-    recent = X.iloc[-24 * 14 :]
-    pred_recent = predict_ensemble(models, recent)
-    rows = []
-    for ts in future:
-        mask = recent.index.hour == ts.hour
-        yhat = float(np.mean(pred_recent[mask])) if mask.any() else float(pred_recent[-1])
-        rows.append(
-            {
-                "timestamp_utc": ts,
-                "yhat_eur_mwh": round(yhat, 2),
-                "run_time_utc": now,
-                "basis_last_data_utc": last,
-            }
-        )
-    return pd.DataFrame(rows)
 
 
 def plot_forecast(forecast: pd.DataFrame, path: Path) -> None:
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(
-        forecast["timestamp_utc"],
+        pd.to_datetime(forecast["timestamp_utc"], utc=True),
         forecast["yhat_eur_mwh"],
         marker="o",
         lw=1.5,
         color="#245B7A",
     )
-    ax.set_title("Day-ahead price forecast (EUR/MWh) with bias correction")
+    ax.set_title("Day-ahead price forecast (EUR/MWh) — recursive 24h")
     ax.set_ylabel("EUR/MWh")
     ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
     rotate_x_labels(ax)
     fig.tight_layout()
     fig.savefig(path, dpi=140, bbox_inches="tight")
@@ -133,7 +122,10 @@ def score_past(price_csv: Path) -> pd.DataFrame:
     p["ts"] = pd.to_datetime(p["timestamp_utc"], utc=True)
     price = p.set_index("ts")["price_eur_mwh"].astype(float)
     rows = []
-    last_detail = last_mae = last_name = None
+    best_detail = None
+    best_mae = 1e9
+    best_name = None
+
     for fpath in sorted(OUT_DIR.glob("forecast_*.csv")):
         fc = pd.read_csv(fpath)
         if "yhat_eur_mwh" not in fc.columns:
@@ -141,7 +133,7 @@ def score_past(price_csv: Path) -> pd.DataFrame:
         fc["timestamp_utc"] = pd.to_datetime(fc["timestamp_utc"], utc=True)
         fc = fc.set_index("timestamp_utc")
         common = fc.index.intersection(price.index)
-        if len(common) == 0:
+        if len(common) < 1:
             continue
         y = price.loc[common]
         pred = fc.loc[common, "yhat_eur_mwh"]
@@ -155,22 +147,21 @@ def score_past(price_csv: Path) -> pd.DataFrame:
                 "rmse": round(rmse, 2),
             }
         )
-        detail = pd.DataFrame({"actual": y, "forecast": pred}).sort_index()
-        last_detail, last_mae, last_name = detail, mae, fpath.name
+        # plot only reasonable full-ish days (skip broken MAE explosions for README chart)
+        if len(common) >= 12 and mae < 80 and mae < best_mae:
+            best_mae = mae
+            best_name = fpath.name
+            best_detail = pd.DataFrame({"actual": y, "forecast": pred}).sort_index()
 
-    if last_detail is not None:
+    if best_detail is not None:
         fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(last_detail.index, last_detail["actual"], label="Actual", color="#17324D")
-        ax.plot(
-            last_detail.index,
-            last_detail["forecast"],
-            label="Forecast",
-            color="#C45C26",
-        )
-        ax.set_title(f"Forecast vs actual - {last_name} (MAE={last_mae:.1f})")
+        ax.plot(best_detail.index, best_detail["actual"], label="Actual", color="#17324D")
+        ax.plot(best_detail.index, best_detail["forecast"], label="Forecast", color="#C45C26")
+        ax.set_title(f"Forecast vs actual - {best_name} (MAE={best_mae:.1f})")
         ax.set_ylabel("EUR/MWh")
         ax.legend(frameon=False)
         ax.grid(True, alpha=0.3)
+        ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
         rotate_x_labels(ax)
         fig.tight_layout()
         fig.savefig(FIG_DIR / "latest_vs_actual.png", dpi=140, bbox_inches="tight")
@@ -197,7 +188,7 @@ def score_table_md(score: pd.DataFrame) -> str:
         "| Forecast file | Hours scored | MAE | RMSE |",
         "|---------------|--------------|-----|------|",
     ]
-    for _, r in score.iterrows():
+    for _, r in score.sort_values("forecast_file").iterrows():
         lines.append(
             f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | {r['rmse']:.2f} |"
         )
@@ -215,7 +206,7 @@ def update_readme(forecast: pd.DataFrame, score: pd.DataFrame, now: pd.Timestamp
 **Generated (UTC):** {now.strftime('%Y-%m-%d %H:%M')}  
 **Based on data up to (UTC):** {basis.strftime('%Y-%m-%d %H:%M')}  
 **Forecast horizon (UTC):** {f0.strftime('%Y-%m-%d %H:%M')} to {f1.strftime('%Y-%m-%d %H:%M')}  
-**Protocol:** Conservative (external_shift = 24) + hourly bias correction
+**Protocol:** Conservative (external_shift = 24) + recursive 24h + hourly bias correction
 
 ### Forecast chart
 
@@ -247,23 +238,14 @@ def main() -> None:
     now = pd.Timestamp.now(tz="UTC")
     print("START daily forecast", now)
     update_data()
-    print("\n--- DATA RANGES AFTER UPDATE ---")
-    for label, path in [
-        ("price", PRICE),
-        ("smard", SMARD),
-        ("weather", WEATHER),
-    ]:
-        if not path.exists():
-            print(label, "MISSING")
-            continue
-        d = pd.read_csv(path, usecols=["timestamp_utc"])
-        t = pd.to_datetime(d["timestamp_utc"], utc=True)
-        print(f"{label}: rows={len(d):,}  {t.min()} -> {t.max()}")
-    print("--- END DATA RANGES ---\n")
+    print_data_ranges()
+
     df = load_frame()
     print(f"Joined rows={len(df)} last={df.index.max()}")
 
-    forecast = make_forecast(df, now)
+    forecast = recursive_forecast(df, now, horizon=24, external_shift=24)
+    print("Horizon:", forecast["timestamp_utc"].min(), "->", forecast["timestamp_utc"].max())
+    print("Basis:", forecast["basis_last_data_utc"].iloc[0])
 
     price_s = df["price_eur_mwh"]
     errors = collect_errors(price_s)
