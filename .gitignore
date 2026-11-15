@@ -44,6 +44,11 @@ tmp/
 temp/
 .cache/
 
+# Keep daily forecast CSVs in git (small files)
+outputs/forecasts/*
+!outputs/forecasts/.gitkeep
+!outputs/forecasts/forecast_*.csv
+
 # Figures: ignore by default, but keep the three README charts
 reports/figures/*
 !reports/figures/.gitkeep

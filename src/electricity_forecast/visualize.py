@@ -13,9 +13,10 @@ sns.set_theme(style="whitegrid", context="talk")
 
 
 def _rotate_time_axis(ax, rotation: int = 90) -> None:
+    """Make time tick labels vertical so they do not overlap."""
     for label in ax.get_xticklabels():
         label.set_rotation(rotation)
-        label.set_ha("center")
+        label.set_ha("center" if rotation == 90 else "right")
         label.set_fontsize(8)
     ax.tick_params(axis="x", which="major", pad=2)
 

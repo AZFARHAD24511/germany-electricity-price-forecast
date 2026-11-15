@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +18,9 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from bias_correction import collect_errors, hourly_bias, apply_bias_correction
-from forecast_horizon import recursive_forecast
+from forecast_horizon import direct_forecast
+from electricity_forecast.evaluate import score_forecast_frame
+from electricity_forecast.features import delivery_day_utc_index
 
 RAW = ROOT / "data" / "raw"
 OUT_DIR = ROOT / "outputs" / "forecasts"
@@ -94,7 +97,9 @@ def load_frame() -> pd.DataFrame:
         weather = pd.DataFrame(columns=["avg_wind", "avg_temp", "avg_rad"])
 
     df = price.join(sm, how="left").join(weather, how="left")
-    df = df.ffill(limit=48)
+    # Short fill only. A long fill (was 48 h) silently hid a stale weather file;
+    # remaining gaps are counted in `rows_with_imputed_features` instead.
+    df = df.ffill(limit=6)
     return df.dropna(subset=["price_eur_mwh"])
 
 
@@ -107,7 +112,7 @@ def plot_forecast(forecast: pd.DataFrame, path: Path) -> None:
         lw=1.5,
         color="#245B7A",
     )
-    ax.set_title("Day-ahead price forecast (EUR/MWh) — recursive 24h")
+    ax.set_title("Day-ahead price forecast (EUR/MWh) — direct 24h, gate-closure protocol")
     ax.set_ylabel("EUR/MWh")
     ax.grid(True, alpha=0.3)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
@@ -118,46 +123,35 @@ def plot_forecast(forecast: pd.DataFrame, path: Path) -> None:
 
 
 def score_past(price_csv: Path) -> pd.DataFrame:
+    """Score every forecast file; add SN24/SN168 baselines and relative MAE."""
     p = pd.read_csv(price_csv)
     p["ts"] = pd.to_datetime(p["timestamp_utc"], utc=True)
     price = p.set_index("ts")["price_eur_mwh"].astype(float)
     rows = []
-    best_detail = None
-    best_mae = 1e9
-    best_name = None
+    latest = None  # most recent fully scored day (NOT the best one: no cherry-picking)
 
     for fpath in sorted(OUT_DIR.glob("forecast_*.csv")):
         fc = pd.read_csv(fpath)
         if "yhat_eur_mwh" not in fc.columns:
             continue
-        fc["timestamp_utc"] = pd.to_datetime(fc["timestamp_utc"], utc=True)
-        fc = fc.set_index("timestamp_utc")
-        common = fc.index.intersection(price.index)
-        if len(common) < 1:
+        r = score_forecast_frame(fc, price)
+        if r is None:
             continue
-        y = price.loc[common]
-        pred = fc.loc[common, "yhat_eur_mwh"]
-        mae = float(np.mean(np.abs(y - pred)))
-        rmse = float(np.sqrt(np.mean((y - pred) ** 2)))
-        rows.append(
-            {
-                "forecast_file": fpath.name,
-                "n_hours_scored": int(len(common)),
-                "mae": round(mae, 2),
-                "rmse": round(rmse, 2),
-            }
-        )
-        # plot only reasonable full-ish days (skip broken MAE explosions for README chart)
-        if len(common) >= 12 and mae < 80 and mae < best_mae:
-            best_mae = mae
-            best_name = fpath.name
-            best_detail = pd.DataFrame({"actual": y, "forecast": pred}).sort_index()
+        r["forecast_file"] = fpath.name
+        rows.append(r)
+        if r["complete_day"]:
+            fc["timestamp_utc"] = pd.to_datetime(fc["timestamp_utc"], utc=True)
+            fc = fc.set_index("timestamp_utc")
+            common = fc.index.intersection(price.index)
+            latest = (fpath.name, r["mae"],
+                      pd.DataFrame({"actual": price.loc[common], "forecast": fc.loc[common, "yhat_eur_mwh"]}).sort_index())
 
-    if best_detail is not None:
+    if latest is not None:
+        name, m, detail = latest
         fig, ax = plt.subplots(figsize=(12, 5))
-        ax.plot(best_detail.index, best_detail["actual"], label="Actual", color="#17324D")
-        ax.plot(best_detail.index, best_detail["forecast"], label="Forecast", color="#C45C26")
-        ax.set_title(f"Forecast vs actual - {best_name} (MAE={best_mae:.1f})")
+        ax.plot(detail.index, detail["actual"], label="Actual", color="#17324D")
+        ax.plot(detail.index, detail["forecast"], label="Forecast", color="#C45C26")
+        ax.set_title(f"Latest scored day - {name} (MAE={m:.1f})")
         ax.set_ylabel("EUR/MWh")
         ax.legend(frameon=False)
         ax.grid(True, alpha=0.3)
@@ -166,7 +160,11 @@ def score_past(price_csv: Path) -> pd.DataFrame:
         fig.tight_layout()
         fig.savefig(FIG_DIR / "latest_vs_actual.png", dpi=140, bbox_inches="tight")
         plt.close(fig)
-    return pd.DataFrame(rows)
+    cols = ["forecast_file", "n_hours_scored", "complete_day", "pre_gate", "mae", "rmse",
+            "mae_sn24", "mae_sn168", "rmae_sn24", "rmae_sn168"]
+    if rows and any("mae_raw" in r for r in rows):
+        cols.insert(6, "mae_raw")
+    return pd.DataFrame(rows).reindex(columns=cols) if rows else pd.DataFrame()
 
 
 def forecast_table_md(forecast: pd.DataFrame) -> str:
@@ -184,14 +182,26 @@ def forecast_table_md(forecast: pd.DataFrame) -> str:
 def score_table_md(score: pd.DataFrame) -> str:
     if score.empty:
         return "_No overlapping actual prices yet for previous forecasts._"
+    full = score[score["complete_day"] == True]  # noqa: E712
     lines = [
-        "| Forecast file | Hours scored | MAE | RMSE |",
-        "|---------------|--------------|-----|------|",
+        "| Forecast file | Hours | MAE | SN24 | SN168 | rMAE vs SN168 | Pre-gate |",
+        "|---------------|-------|-----|------|-------|---------------|----------|",
     ]
     for _, r in score.sort_values("forecast_file").iterrows():
         lines.append(
-            f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | {r['rmse']:.2f} |"
+            f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | "
+            f"{r['mae_sn24']:.2f} | {r['mae_sn168']:.2f} | {r['rmae_sn168']:.2f} | {r['pre_gate']} |"
         )
+    if len(full):
+        lines.append("")
+        lines.append(
+            f"**Complete days: {len(full)} | mean MAE {full['mae'].mean():.2f} | "
+            f"mean SN24 {full['mae_sn24'].mean():.2f} | mean SN168 {full['mae_sn168'].mean():.2f} | "
+            f"days model beats SN168: {(full['rmae_sn168'] < 1).sum()}/{len(full)}**"
+        )
+    lines.append("")
+    lines.append("_rMAE < 1 means the model beat the seasonal-naive baseline that day. "
+                 "Short samples: no statistical claim until >= 60 complete pre-gate days._")
     return "\n".join(lines)
 
 
@@ -206,7 +216,7 @@ def update_readme(forecast: pd.DataFrame, score: pd.DataFrame, now: pd.Timestamp
 **Generated (UTC):** {now.strftime('%Y-%m-%d %H:%M')}  
 **Based on data up to (UTC):** {basis.strftime('%Y-%m-%d %H:%M')}  
 **Forecast horizon (UTC):** {f0.strftime('%Y-%m-%d %H:%M')} to {f1.strftime('%Y-%m-%d %H:%M')}  
-**Protocol:** Conservative (external_shift = 24) + recursive 24h + hourly bias correction
+**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + direct 24h + shrunk hourly bias correction
 
 ### Forecast chart
 
@@ -235,31 +245,45 @@ _If the vs-actual chart is missing, there is not yet enough overlap with realize
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--target-date", default=None, help="Delivery date YYYY-MM-DD (default: tomorrow, Europe/Berlin)")
+    ap.add_argument("--no-update", action="store_true", help="Skip data download")
+    args = ap.parse_args()
+
     now = pd.Timestamp.now(tz="UTC")
     print("START daily forecast", now)
-    update_data()
+    if not args.no_update:
+        update_data()
     print_data_ranges()
 
     df = load_frame()
     print(f"Joined rows={len(df)} last={df.index.max()}")
 
-    forecast = recursive_forecast(df, now, horizon=24, external_shift=24)
-    print("Horizon:", forecast["timestamp_utc"].min(), "->", forecast["timestamp_utc"].max())
-    print("Basis:", forecast["basis_last_data_utc"].iloc[0])
+    forecast = direct_forecast(df, now, target_date=args.target_date, external_shift=24)
+    tgt = forecast["target_date"].iloc[0]
+    print("Target delivery day:", tgt, "| pre_gate:", bool(forecast["pre_gate"].iloc[0]),
+          "| data_gap_hours:", forecast["data_gap_hours"].iloc[0],
+          "| rows with imputed features:", forecast["rows_with_imputed_features"].iloc[0])
+    if forecast["data_gap_hours"].iloc[0] > 48:
+        print("WARNING: price history ends >48 h before the delivery day; forecast quality is not comparable.")
 
     price_s = df["price_eur_mwh"]
-    errors = collect_errors(price_s)
-    bias = hourly_bias(errors, min_obs=2, last_n_days=14)
+    errors = collect_errors(price_s, before=delivery_day_utc_index(tgt)[0])
+    bias = hourly_bias(errors, min_obs=5, last_n_days=14)
     forecast = apply_bias_correction(forecast, bias)
     print("Bias hours available:", list(bias.index) if len(bias) else "none yet")
 
-    out_csv = OUT_DIR / f"forecast_{now.strftime('%Y-%m-%d')}.csv"
+    out_csv = OUT_DIR / f"forecast_{tgt}.csv"
+    if out_csv.exists() and not bool(forecast["pre_gate"].iloc[0]):
+        old = pd.read_csv(out_csv, usecols=lambda c: c == "pre_gate")
+        if "pre_gate" in old.columns and bool(old["pre_gate"].iloc[0]):
+            print("Existing PRE-GATE forecast kept; this late run is not saved over it.")
+            out_csv = OUT_DIR / f"late_forecast_{tgt}.csv"
     forecast.to_csv(out_csv, index=False)
     print(forecast[["timestamp_utc", "yhat_eur_mwh"]].to_string(index=False))
     print("Saved ->", out_csv)
 
     plot_forecast(forecast, FIG_DIR / "latest_forecast.png")
-    print("Saved ->", FIG_DIR / "latest_forecast.png")
 
     score = score_past(PRICE)
     if not score.empty:

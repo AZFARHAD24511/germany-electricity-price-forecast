@@ -71,7 +71,13 @@ Full write-up: [`reports/methodology/CONSERVATIVE_LEAKAGE.md`](reports/methodolo
 
 ---
 
-## 5. Results (Conservative protocol – locked)
+## 5. Results (Conservative protocol)
+
+> **Status note (Nov 2026):** the table below was produced with the *legacy* rolling features
+> (`shift(1).rolling`), which use price(t-1) and are not available at gate closure. These numbers are
+> therefore optimistic. Re-run `python scripts/run_ablation.py ...` (row `B_gate_shift24` is the new
+> primary result, row `A_legacy_shift24` reproduces this table) and replace the table before citing it.
+
 
 Weighted averages over the three test windows:
 
@@ -195,10 +201,10 @@ Licence: MIT (code). Underlying market data remain subject to their original lic
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-15 10:37  
+**Generated (UTC):** 2026-11-15 11:51  
 **Based on data up to (UTC):** 2026-11-15 22:00  
 **Forecast horizon (UTC):** 2026-11-15 23:00 to 2026-11-16 22:00  
-**Protocol:** Conservative (external_shift = 24) + recursive 24h + hourly bias correction
+**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + direct 24h + shrunk hourly bias correction
 
 ### Forecast chart
 
@@ -208,46 +214,50 @@ Licence: MIT (code). Underlying market data remain subject to their original lic
 
 | Hour (UTC) | Forecast (EUR/MWh) | Bias |
 |------------|--------------------|------|
-| 2026-11-15 23:00 | 122.90 | -6.23 |
-| 2026-11-16 00:00 | 133.18 | -10.83 |
-| 2026-11-16 01:00 | 129.65 | -8.49 |
-| 2026-11-16 02:00 | 124.06 | -7.68 |
-| 2026-11-16 03:00 | 124.76 | -7.63 |
-| 2026-11-16 04:00 | 127.38 | -0.83 |
-| 2026-11-16 05:00 | 156.96 | -1.28 |
-| 2026-11-16 06:00 | 201.84 | -10.64 |
-| 2026-11-16 07:00 | 215.43 | -13.00 |
-| 2026-11-16 08:00 | 179.69 | -7.54 |
-| 2026-11-16 09:00 | 158.40 | -5.16 |
-| 2026-11-16 10:00 | 149.69 | -2.65 |
-| 2026-11-16 11:00 | 148.01 | -0.39 |
-| 2026-11-16 12:00 | 163.76 | -0.09 |
-| 2026-11-16 13:00 | 182.62 | -2.39 |
-| 2026-11-16 14:00 | 208.76 | -4.69 |
-| 2026-11-16 15:00 | 234.30 | -7.74 |
-| 2026-11-16 16:00 | 251.49 | -3.73 |
-| 2026-11-16 17:00 | 237.03 | 2.27 |
-| 2026-11-16 18:00 | 228.21 | 2.73 |
-| 2026-11-16 19:00 | 200.41 | 6.96 |
-| 2026-11-16 20:00 | 182.04 | 7.78 |
-| 2026-11-16 21:00 | 186.45 | 1.01 |
-| 2026-11-16 22:00 | 166.00 | 0.36 |
+| 2026-11-15 23:00 | 141.23 | -13.62 |
+| 2026-11-16 00:00 | 163.94 | -20.29 |
+| 2026-11-16 01:00 | 156.06 | -18.51 |
+| 2026-11-16 02:00 | 144.34 | -17.48 |
+| 2026-11-16 03:00 | 148.00 | -17.53 |
+| 2026-11-16 04:00 | 167.37 | -9.36 |
+| 2026-11-16 05:00 | 192.65 | -9.33 |
+| 2026-11-16 06:00 | 225.75 | -17.78 |
+| 2026-11-16 07:00 | 229.03 | -21.19 |
+| 2026-11-16 08:00 | 204.05 | -17.68 |
+| 2026-11-16 09:00 | 181.46 | -15.58 |
+| 2026-11-16 10:00 | 168.30 | -14.36 |
+| 2026-11-16 11:00 | 167.04 | -13.22 |
+| 2026-11-16 12:00 | 174.98 | -12.63 |
+| 2026-11-16 13:00 | 209.48 | -12.11 |
+| 2026-11-16 14:00 | 234.60 | -15.83 |
+| 2026-11-16 15:00 | 255.69 | -18.25 |
+| 2026-11-16 16:00 | 278.32 | -12.89 |
+| 2026-11-16 17:00 | 262.90 | -7.77 |
+| 2026-11-16 18:00 | 255.76 | -9.51 |
+| 2026-11-16 19:00 | 235.78 | -5.45 |
+| 2026-11-16 20:00 | 201.93 | -2.16 |
+| 2026-11-16 21:00 | 182.40 | -7.21 |
+| 2026-11-16 22:00 | 156.13 | -9.42 |
 
 ### Previous forecasts vs realized prices
 
-| Forecast file | Hours scored | MAE | RMSE |
-|---------------|--------------|-----|------|
-| `forecast_2026-10-31.csv` | 24 | 67.09 | 70.49 |
-| `forecast_2026-11-01.csv` | 24 | 65.43 | 67.68 |
-| `forecast_2026-11-02.csv` | 24 | 18.75 | 22.98 |
-| `forecast_2026-11-03.csv` | 24 | 16.60 | 22.06 |
-| `forecast_2026-11-04.csv` | 24 | 15.31 | 22.30 |
-| `forecast_2026-11-05.csv` | 24 | 37.02 | 38.45 |
-| `forecast_2026-11-07.csv` | 24 | 16.96 | 25.55 |
-| `forecast_2026-11-08.csv` | 24 | 82.04 | 103.07 |
-| `forecast_2026-11-10.csv` | 24 | 100.49 | 106.82 |
-| `forecast_2026-11-11.csv` | 24 | 119.75 | 124.82 |
-| `forecast_2026-11-12.csv` | 24 | 31.60 | 35.28 |
+| Forecast file | Hours | MAE | SN24 | SN168 | rMAE vs SN168 | Pre-gate |
+|---------------|-------|-----|------|-------|---------------|----------|
+| `forecast_2026-10-31.csv` | 24 | 67.09 | 9.32 | 241.66 | 0.28 | nan |
+| `forecast_2026-11-01.csv` | 24 | 65.43 | 21.26 | 163.01 | 0.40 | nan |
+| `forecast_2026-11-02.csv` | 24 | 18.75 | 12.43 | 93.69 | 0.20 | nan |
+| `forecast_2026-11-03.csv` | 24 | 16.60 | 6.02 | 16.75 | 0.99 | nan |
+| `forecast_2026-11-04.csv` | 24 | 15.31 | 13.02 | 54.30 | 0.28 | nan |
+| `forecast_2026-11-05.csv` | 24 | 37.02 | 18.49 | 14.01 | 2.64 | nan |
+| `forecast_2026-11-07.csv` | 24 | 16.96 | 17.62 | 20.95 | 0.81 | nan |
+| `forecast_2026-11-08.csv` | 24 | 82.04 | 62.83 | 99.37 | 0.83 | nan |
+| `forecast_2026-11-10.csv` | 24 | 100.49 | 117.60 | 60.41 | 1.66 | nan |
+| `forecast_2026-11-11.csv` | 24 | 119.75 | 46.70 | 113.90 | 1.05 | nan |
+| `forecast_2026-11-12.csv` | 24 | 31.60 | 35.98 | 62.11 | 0.51 | nan |
+
+**Complete days: 11 | mean MAE 51.91 | mean SN24 32.84 | mean SN168 85.47 | days model beats SN168: 8/11**
+
+_rMAE < 1 means the model beat the seasonal-naive baseline that day. Short samples: no statistical claim until >= 60 complete pre-gate days._
 
 ![Forecast vs actual](outputs/figures/latest_vs_actual.png)
 
