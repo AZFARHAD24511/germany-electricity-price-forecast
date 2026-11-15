@@ -182,5 +182,6 @@ def score_forecast_frame(fc: pd.DataFrame, price: pd.Series) -> dict | None:
     if "yhat_raw_eur_mwh" in fc.columns:
         row["mae_raw"] = round(mae(y, fc.loc[common, "yhat_raw_eur_mwh"]), 2)
     row["complete_day"] = bool(len(common) >= 23)
+    row["delivery_start_utc"] = str(common.min())
     row["pre_gate"] = bool(fc["pre_gate"].iloc[0]) if "pre_gate" in fc.columns else np.nan
     return row

@@ -160,11 +160,19 @@ def score_past(price_csv: Path) -> pd.DataFrame:
         fig.tight_layout()
         fig.savefig(FIG_DIR / "latest_vs_actual.png", dpi=140, bbox_inches="tight")
         plt.close(fig)
-    cols = ["forecast_file", "n_hours_scored", "complete_day", "pre_gate", "mae", "rmse",
+    cols = ["forecast_file", "n_hours_scored", "complete_day", "pre_gate", "delivery_start_utc", "mae", "rmse",
             "mae_sn24", "mae_sn168", "rmae_sn24", "rmae_sn168"]
     if rows and any("mae_raw" in r for r in rows):
         cols.insert(6, "mae_raw")
-    return pd.DataFrame(rows).reindex(columns=cols) if rows else pd.DataFrame()
+    if not rows:
+        return pd.DataFrame()
+    out = pd.DataFrame(rows).reindex(columns=cols)
+    # Several files scoring the SAME delivery hours are versions of one day, not extra days.
+    out["pre_gate_ok"] = out["pre_gate"].map(lambda v: v is True or v == True)  # noqa: E712
+    out = out.sort_values(["delivery_start_utc", "pre_gate_ok", "forecast_file"])
+    out["duplicate_delivery"] = out.duplicated("delivery_start_utc", keep="last")
+    out["counted"] = out["complete_day"] & out["pre_gate_ok"] & ~out["duplicate_delivery"]
+    return out.sort_values("forecast_file").reset_index(drop=True)
 
 
 def forecast_table_md(forecast: pd.DataFrame) -> str:
@@ -182,26 +190,43 @@ def forecast_table_md(forecast: pd.DataFrame) -> str:
 def score_table_md(score: pd.DataFrame) -> str:
     if score.empty:
         return "_No overlapping actual prices yet for previous forecasts._"
-    full = score[score["complete_day"] == True]  # noqa: E712
+
+    def why(r) -> str:
+        if r["counted"]:
+            return "yes"
+        if not r["complete_day"]:
+            return "no: incomplete"
+        if r["duplicate_delivery"]:
+            return "no: same day as another file"
+        if not r["pre_gate_ok"]:
+            return "no: not pre-gate"
+        return "no"
+
     lines = [
-        "| Forecast file | Hours | MAE | SN24 | SN168 | rMAE vs SN168 | Pre-gate |",
-        "|---------------|-------|-----|------|-------|---------------|----------|",
+        "| Forecast file | Hours | MAE | SN24 | SN168 | rMAE vs SN24 | rMAE vs SN168 | Pre-gate | Counted |",
+        "|---------------|-------|-----|------|-------|--------------|---------------|----------|---------|",
     ]
     for _, r in score.sort_values("forecast_file").iterrows():
         lines.append(
-            f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | "
-            f"{r['mae_sn24']:.2f} | {r['mae_sn168']:.2f} | {r['rmae_sn168']:.2f} | {r['pre_gate']} |"
+            f"| `{r['forecast_file']}` | {r['n_hours_scored']} | {r['mae']:.2f} | {r['mae_sn24']:.2f} | "
+            f"{r['mae_sn168']:.2f} | {r['rmae_sn24']:.2f} | {r['rmae_sn168']:.2f} | {r['pre_gate']} | {why(r)} |"
         )
-    if len(full):
-        lines.append("")
-        lines.append(
-            f"**Complete days: {len(full)} | mean MAE {full['mae'].mean():.2f} | "
-            f"mean SN24 {full['mae_sn24'].mean():.2f} | mean SN168 {full['mae_sn168'].mean():.2f} | "
-            f"days model beats SN168: {(full['rmae_sn168'] < 1).sum()}/{len(full)}**"
-        )
+    ok = score[score["counted"]]
     lines.append("")
-    lines.append("_rMAE < 1 means the model beat the seasonal-naive baseline that day. "
-                 "Short samples: no statistical claim until >= 60 complete pre-gate days._")
+    if len(ok) == 0:
+        lines.append("**Valid scored days (complete, pre-gate, unique delivery day): 0 - no performance claim possible yet.**")
+    else:
+        best = ok[["mae_sn24", "mae_sn168"]].min(axis=1)
+        lines += [
+            f"**Valid scored days: {len(ok)} | mean MAE model {ok['mae'].mean():.2f} | SN24 {ok['mae_sn24'].mean():.2f} | "
+            f"SN168 {ok['mae_sn168'].mean():.2f} | best-of-baselines {best.mean():.2f}**",
+            "",
+            f"**Days model beats SN24: {(ok['mae'] < ok['mae_sn24']).sum()}/{len(ok)} | "
+            f"beats the better of SN24/SN168: {(ok['mae'] < best).sum()}/{len(ok)}**",
+        ]
+    lines += ["", "_Only rows marked 'Counted = yes' enter the summary. Files from the old code (Pre-gate nan), "
+              "post-gate runs and duplicate delivery days are shown for transparency but not counted. "
+              "No statistical claim until >= 60 valid days._"]
     return "\n".join(lines)
 
 

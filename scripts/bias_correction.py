@@ -25,7 +25,9 @@ def collect_errors(price: pd.Series, forecast_dir: Path = OUT_DIR, max_files: in
     rows = []
     for fpath in sorted(forecast_dir.glob("forecast_*.csv"))[-max_files:]:
         fc = pd.read_csv(fpath)
-        col = "yhat_raw_eur_mwh" if "yhat_raw_eur_mwh" in fc.columns else "yhat_eur_mwh"
+        # Files written by the old code have no raw column and contain already-corrected
+        # values: they must NOT be used to estimate a bias.
+        col = "yhat_raw_eur_mwh"
         if col not in fc.columns:
             continue
         fc["timestamp_utc"] = pd.to_datetime(fc["timestamp_utc"], utc=True)

@@ -11,3 +11,9 @@
 5. run_daily_forecast.py  forecast_<delivery date>.csv, score table with baselines, figure shows the LATEST
                  scored day (old code plotted the best day with MAE<80 = cherry-picking), ffill 48 h -> 6 h.
 6. scripts/run_ablation.py, tests/test_leakage.py (8 tests).
+
+# v5
+7. report.py + update_readme_results.py: figures (ablation_mae.png, rolling_eval.png) and README sections
+   (key findings, 5.1-5.3) are regenerated from reports/metrics/*.csv; run_ablation.py and run_rolling_eval.py
+   call it automatically. run_daily_forecast.py keeps updating the live block.
+8. run_rolling_eval.py: replay of the live procedure over past delivery days.

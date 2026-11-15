@@ -86,6 +86,11 @@ def main() -> None:
     with pd.option_context("display.width", 200, "display.float_format", "{:.3f}".format):
         print(res.to_string(index=False))
     print("saved ->", args.out)
+    try:
+        from electricity_forecast.report import update_results
+        update_results(ROOT)
+    except Exception as exc:  # report generation must never break an evaluation run
+        print("README/figure update skipped:", exc)
 
 
 if __name__ == "__main__":

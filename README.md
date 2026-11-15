@@ -1,93 +1,110 @@
 # Germany Day-Ahead Electricity Price Forecast
 
-Leakage-aware forecasting of German EPEX Spot day-ahead prices (EUR/MWh) under an explicit **gate-closure** information set.
+Leakage-aware forecasting of German EPEX Spot day-ahead prices (DE/LU, EUR/MWh) under an explicit **gate-closure** information set, evaluated against realised day-ahead prices and seasonal-naive baselines.
 
-**Author:** Azizallah Farhadi · `farhadmy1974@gmail.com`  
-**Status:** Research prototype (updated Nov 2026)  
-**Repository:** https://github.com/AZFARHAD24511/germany-electricity-price-forecast
+**Author:** Azizallah Farhadi · `farhadmy1974@gmail.com`
+**Status:** Research prototype (updated Nov 2026) · **Repository:** https://github.com/AZFARHAD24511/germany-electricity-price-forecast
+
+---
+
+## Key findings (as of the latest run)
+
+<!-- KEY_START -->
+1. **Gate-safe model beats seasonal naive.** 26 % lower MAE than SN24 in a 89-day backtest and 26 % in a 23-day retrospective rolling check (section 5).
+2. **The original rolling features leaked.** Removing the leak costs 1.68 EUR/MWh (6.0 % of MAE).
+3. **External data add no skill at a 24 h lag** (a price-only model is as good). Un-lagged externals would lower MAE by 7.4 EUR/MWh, but only if forecasts available before gate closure can be sourced.
+4. **No claim about live performance yet.** Valid pre-gate live days are counted in the live block at the end of this file.
+<!-- KEY_END -->
 
 ---
 
 ## 1. Motivation
 
-Day-ahead price forecasts support trading, risk management, flexibility dispatch, and sectoral impact analysis when electricity prices move.
-
-The main modelling risk is **data leakage**: using information that was not available at auction gate closure (~12:00 CET on day **D−1** for delivery day **D**).
-
----
+Day-ahead price forecasts support trading, risk management, flexibility dispatch and sectoral impact analysis. The main modelling risk is **look-ahead bias**: using information that was not available at auction gate closure (12:00 CET on day D-1 for delivery day D).
 
 ## 2. Data
 
 | Source | Content | Coverage (approx.) |
 |--------|---------|---------------------|
-| Hourly market data | Day-ahead price (EUR/MWh) | 2020–2026 |
-| SMARD chart-data endpoint | Day-ahead wind & solar forecasts | 2022–2026 |
-| Weather archive / Open-Meteo | Regional temperature, 100 m wind, shortwave radiation | 2022–2026 |
+| Hourly market data | Day-ahead price (EUR/MWh) | 2020-2026 |
+| SMARD chart-data endpoint | Day-ahead wind & solar forecasts | 2022-2026 |
+| Weather archive / Open-Meteo | Regional temperature, 100 m wind, shortwave radiation | 2022-2026 |
 
-**Important limitation:** the SMARD `/app/chart_data/...` endpoint is **not** an official Bundesnetzagentur API. `meta_data.created` is **not** a reliable issue time. An official SMARD API is under development.
-
-Raw files: `data/raw/` (gitignored).
-
----
+**Limitations.** The SMARD `/app/chart_data/...` endpoint is *not* an official Bundesnetzagentur API; `meta_data.created` is not a reliable issue time, so the publication time of the wind/solar forecasts relative to gate closure is unverified. The weather archive may contain reanalysis (observed) values rather than true forecasts. Raw files live in `data/raw/` (gitignored).
 
 ## 3. Leakage-control protocol (gate closure)
 
-Primary protocol (`price_info="gate"`, `external_shift=24`):
+Primary protocol: `price_info="gate"`, `external_shift=24`.
 
 | Feature family | Availability rule |
 |----------------|-------------------|
-| Price lags & day-level context | Only **complete days through D−1** (no prices from delivery day D) |
-| Calendar / holidays | Always known |
-| SMARD wind/solar | Shifted by **+24 h** |
-| Weather | Default +24 h; optional stricter **+36 h** in ablation |
+| Price lags (24, 48, 72, 168, 336 h) | Always >= 24 h, hence inside day D-1 or earlier |
+| Price context (mean/std/min/max/last of D-1, 7-day mean/std) | Only **complete Berlin days up to D-1** |
+| Calendar / German federal holidays | Always known |
+| SMARD wind/solar | Lagged **24 h** |
+| Weather | Lagged 24 h (strict variant: 36 h, ablation C) |
 
-Legacy `shift(1).rolling` features are **not** the primary protocol. They can use hour *t−1* on day D and are **optimistic** relative to true gate closure. See `CHANGES.md` and `reports/methodology/CONSERVATIVE_LEAKAGE.md`.
+The legacy features (`shift(1).rolling`) used price(t-1) of the delivery day itself and are kept only as ablation row A. `tests/test_leakage.py` checks that changing any price of the delivery day leaves all gate-closure features unchanged.
 
----
+## 4. Method
 
-## 4. Method (current)
+1. **Features:** lags and complete-day context above, cyclical calendar encodings, holidays, lagged externals.
+2. **Model:** `HistGradientBoostingRegressor` + `Ridge`, ensemble weights 0.65 / 0.35.
+3. **Horizon:** **direct** 24 h forecast for the Berlin delivery date (no recursion: every input is a real observation).
+4. **Post-processing:** shrunk hourly bias correction estimated from *raw* past forecasts (not part of the results below).
+5. **Flags in every forecast file:** `pre_gate`, `gate_closure_utc`, `data_gap_hours`, `rows_with_imputed_features`.
+6. **Baselines:** SN24 (same hour yesterday) and SN168 (same hour last week). Tests: Diebold-Mariano with HLN correction on daily losses.
 
-1. **Features** — lags ≥ 24 h from D−1 context, calendar encodings, German federal holidays, lagged externals  
-2. **Model** — HistGradientBoosting + Ridge ensemble (weights ≈ 0.65 / 0.35)  
-3. **Horizon** — **direct** 24 h forecast for the Berlin **delivery date** (not recursive hour-by-hour)  
-4. **Post-process** — hourly bias correction from **raw** predictions (shrinkage; min. observations)  
-5. **Flags** — `pre_gate`, `gate_closure_utc`, `data_gap_hours`
+Entry points: `scripts/run_daily_forecast.py` (live), `scripts/run_ablation.py` (ablation + DM), `scripts/run_rolling_eval.py` (replay of the live procedure), `scripts/update_readme_results.py` (rebuild this section from the metric CSVs).
 
-Daily entry point: `scripts/run_daily_forecast.py`  
-Ablation / DM tests: `scripts/run_ablation.py`  
-Leakage tests: `tests/test_leakage.py`
+<!-- RESULTS_START -->
 
----
+## 5. Results
 
-## 5. Results — read this first
+_Auto-generated by `scripts/run_ablation.py` / `scripts/run_rolling_eval.py` - last update 2026-11-15 17:05 UTC._
 
-### 5.1 Legacy backtest (optimistic — not gate-safe)
+### 5.1 Backtest ablation (gate-closure protocol)
 
-Produced with **legacy** rolling features. Do **not** cite as gate-safe performance. Re-run `python scripts/run_ablation.py` and use row **`B_gate_shift24`**.
+Expanding-window backtest, 89 test days (2136 hours) in three windows. p-values: one-sided Diebold-Mariano test (daily losses, Harvey-Leybourne-Newbold correction) that the model beats the baseline.
 
-| Model | MAE (EUR/MWh) | Notes |
-|-------|----------------|--------|
-| Seasonal Naive 24 h | ~37.8 | Reference (legacy windows) |
-| Ensemble (legacy features) | ~26.3 | **Optimistic — not gate-safe** |
+| Setup | MAE | RMSE | rMAE vs SN24 | rMAE vs SN168 | p vs SN24 | Note |
+|-------|-----|------|--------------|---------------|-----------|------|
+| SN24 (same hour yesterday) | 37.79 | - | 1.00 | - | - | baseline |
+| SN168 (same hour last week) | 48.26 | - | - | 1.00 | - | baseline |
+| A  legacy rolling (leaky), shift 24 | 26.37 | 35.95 | 0.698 | 0.547 | <0.001 | uses price(t-1): not available at gate closure |
+| **B  gate-closure, shift 24  [PRIMARY]** | **28.05** | 40.52 | 0.742 | 0.581 | <0.001 | primary, leak-free price features |
+| C  gate-closure, weather +36 h | 28.16 | 40.37 | 0.745 | 0.584 | <0.001 | strict availability for observed weather |
+| D  shift 0  [upper bound, not gate-safe] | 20.60 | 29.66 | 0.545 | 0.427 | <0.001 | upper bound: assumes externals known at gate closure |
+| E  price-only (no external data) | 27.93 | 40.28 | 0.739 | 0.579 | <0.001 | tests whether externals add skill |
 
-**Price series overview**
+![Ablation](reports/figures/ablation_mae.png)
 
-![Price overview](reports/figures/price_overview.png)
+- **Leak size.** The legacy `shift(1).rolling` features flattered MAE by 1.68 EUR/MWh (6.0 %) compared with the gate-closure features.
+- **Primary result (B).** MAE 28.05 vs SN24 37.79: 26 % lower error than seasonal naive 24 h (DM p <0.001).
+- **External data add no measurable skill at a 24 h lag** (price-only MAE 27.93 vs 28.05). The current model is effectively a price-only model.
+- **Upper bound (D).** Un-lagged external data would lower MAE by 7.45 EUR/MWh (27 %). This is NOT a result: it requires wind/solar/weather *forecasts* that were demonstrably published before 12:00 CET on D-1, and the weather archive may contain reanalysis rather than forecasts.
 
-**Backtest MAE comparison**
+### 5.2 Retrospective rolling-origin check (same code as the live job)
 
-![Backtest MAE](reports/figures/backtest_mae.png)
+For each Berlin delivery day 2026-10-24 to 2026-11-15 the data from that day onward is hidden, the ensemble is retrained, and a direct 24 h forecast is scored. This is a **replay**, not a live pre-gate record.
 
-**Example prediction vs actual (one window)**
+| Days | MAE model | MAE SN24 | MAE SN168 | Days model < SN24 | Days model < better of SN24/SN168 | DM p vs SN24 (daily) |
+|------|-----------|----------|-----------|-------------------|-----------------------------------|----------------------|
+| 23 | **35.47** | 48.23 | 96.79 | 16/23 | 14/23 | 0.006 |
 
-![Pred vs actual](reports/figures/pred_vs_actual_w1.png)
+![Rolling check](reports/figures/rolling_eval.png)
 
-*(Regenerate with `python scripts/run_pipeline.py` if images are missing.)*
+Days on which the model lost to SN24: 2026-10-29, 2026-10-31, 2026-11-01, 2026-11-02, 2026-11-03, 2026-11-04, 2026-11-05. "Better of SN24/SN168" is chosen after seeing the day's outcome and is a deliberately harsh yardstick; the primary comparison is SN24.
 
-### 5.2 Live operational scores
+### 5.3 What is NOT yet established
 
-Updated by the daily job below. Older files may have `pre_gate = nan`.  
-No strong statistical claim until ≥ ~60 complete **pre-gate** days are scored.
+- **No valid live record yet.** Earlier daily files were produced by superseded code and named by run date, not delivery date; they are archived in `outputs/forecasts/legacy/` and excluded. Valid pre-gate days are counted in the live block below.
+- Short samples (one season, 89 + 23 days). Regime changes (e.g. gas-price shocks) are not covered.
+- Bias correction has not been evaluated separately; the results above are without it.
+- Hourly resolution only; the day-ahead market moved to 15-minute products on 1 Oct 2025.
+- Point forecasts only (no uncertainty); no economic-value evaluation yet.
+
+<!-- RESULTS_END -->
 
 ---
 
@@ -95,128 +112,59 @@ No strong statistical claim until ≥ ~60 complete **pre-gate** days are scored.
 
 ```text
 germany-electricity-price-forecast/
-├── data/raw/
-├── src/electricity_forecast/
+├── data/raw/                      # gitignored CSVs
+├── src/electricity_forecast/      # data, features, train, evaluate, report
 ├── scripts/
 │   ├── update_data.py
-│   ├── forecast_horizon.py
+│   ├── forecast_horizon.py        # direct 24 h forecast
 │   ├── bias_correction.py
-│   ├── run_daily_forecast.py
-│   ├── run_ablation.py
-│   └── run_pipeline.py
+│   ├── run_daily_forecast.py      # live job (updates the live block below)
+│   ├── run_ablation.py            # writes reports/metrics/ablation.csv + section 5.1
+│   ├── run_rolling_eval.py        # writes reports/metrics/rolling_eval.csv + section 5.2
+│   └── update_readme_results.py
 ├── tests/test_leakage.py
-├── reports/figures/
-├── outputs/figures/
-├── outputs/forecasts/
+├── reports/{figures,metrics,methodology}/
+├── outputs/{forecasts,figures}/   # live forecasts (legacy files in forecasts/legacy/)
 ├── CHANGES.md
 └── README.md
 ```
-
----
 
 ## 7. Quick start
 
 ```bash
 git clone https://github.com/AZFARHAD24511/germany-electricity-price-forecast.git
 cd germany-electricity-price-forecast
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e .
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt && pip install -e .
 
-# put full CSVs into data/raw/
-python scripts/run_daily_forecast.py
+# full CSVs into data/raw/, then:
+python scripts/run_ablation.py     --price data/raw/germany_electricity_hourly.csv --smard data/raw/germany_smard_day_ahead_forecasts.csv --weather data/raw/germany_weather_forecast_archive.csv
+python scripts/run_rolling_eval.py --price data/raw/germany_electricity_hourly.csv --smard data/raw/germany_smard_day_ahead_forecasts.csv --weather data/raw/germany_weather_forecast_archive.csv --start 2026-10-24 --end 2026-11-16
+python scripts/run_daily_forecast.py     # schedule before 10:00 UTC (gate closes 11:00 UTC in winter)
 pytest tests/ -q
 ```
 
----
+Running these scripts regenerates the figures in `reports/figures/` and rewrites sections 5.1-5.3 and the live block of this README.
 
 ## 8. Roadmap
 
-- [x] Conservative external shift (24 h) documented  
-- [x] Gate-closure feature set + direct delivery-day forecast  
-- [x] Leakage tests + ablation script  
-- [ ] ≥ 60 pre-gate scored days before strong claims  
-- [ ] Official issue-time data when available  
-- [ ] Optional 15-minute Day-Ahead products  
+- [x] Gate-closure feature set, direct delivery-day forecast, leakage tests
+- [x] Ablation and rolling-origin evaluation with DM tests
+- [ ] >= 60 valid live pre-gate days before any live-performance claim
+- [ ] Forecast sources with verifiable publication times (wind/solar/weather run times)
+- [ ] Price-level drivers (gas, CO2) and a model anchored on lag-24 (predict the change)
+- [ ] Quantile forecasts and economic-value evaluation
+- [ ] 15-minute day-ahead products
 - [ ] FIGARO sectoral shock module (separate track)
-
----
 
 ## 9. Licence & attribution
 
-Code: MIT.  
-Market data remain under their original terms.  
-SMARD-related series: attribution *Bundesnetzagentur | SMARD.de* (chart-data endpoint is third-party).
+Code: MIT. Market data remain under their original terms. SMARD-related series: *Bundesnetzagentur | SMARD.de* (the chart-data endpoint itself is third-party).
 
 <!-- DAILY_FORECAST_START -->
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-15 16:32  
-**Based on data up to (UTC):** 2026-11-15 22:00  
-**Forecast horizon (UTC):** 2026-11-15 23:00 to 2026-11-16 22:00  
-**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + direct 24h + shrunk hourly bias correction
-
-### Forecast chart
-
-![Daily forecast](outputs/figures/latest_forecast.png)
-
-### Forecast table (EUR/MWh)
-
-| Hour (UTC) | Forecast (EUR/MWh) | Bias |
-|------------|--------------------|------|
-| 2026-11-15 23:00 | 141.23 | -13.62 |
-| 2026-11-16 00:00 | 163.94 | -20.29 |
-| 2026-11-16 01:00 | 156.06 | -18.51 |
-| 2026-11-16 02:00 | 144.34 | -17.48 |
-| 2026-11-16 03:00 | 148.00 | -17.53 |
-| 2026-11-16 04:00 | 167.37 | -9.36 |
-| 2026-11-16 05:00 | 192.65 | -9.33 |
-| 2026-11-16 06:00 | 225.77 | -17.78 |
-| 2026-11-16 07:00 | 229.06 | -21.19 |
-| 2026-11-16 08:00 | 204.09 | -17.68 |
-| 2026-11-16 09:00 | 181.51 | -15.58 |
-| 2026-11-16 10:00 | 167.71 | -14.36 |
-| 2026-11-16 11:00 | 165.78 | -13.22 |
-| 2026-11-16 12:00 | 175.17 | -12.63 |
-| 2026-11-16 13:00 | 209.49 | -12.11 |
-| 2026-11-16 14:00 | 233.10 | -15.83 |
-| 2026-11-16 15:00 | 255.73 | -18.25 |
-| 2026-11-16 16:00 | 278.36 | -12.89 |
-| 2026-11-16 17:00 | 262.92 | -7.77 |
-| 2026-11-16 18:00 | 255.74 | -9.51 |
-| 2026-11-16 19:00 | 235.77 | -5.45 |
-| 2026-11-16 20:00 | 203.87 | -2.16 |
-| 2026-11-16 21:00 | 184.36 | -7.21 |
-| 2026-11-16 22:00 | 156.18 | -9.42 |
-
-### Previous forecasts vs realized prices
-
-| Forecast file | Hours | MAE | SN24 | SN168 | rMAE vs SN168 | Pre-gate |
-|---------------|-------|-----|------|-------|---------------|----------|
-| `forecast_2026-10-31.csv` | 24 | 67.09 | 9.32 | 241.66 | 0.28 | nan |
-| `forecast_2026-11-01.csv` | 24 | 65.43 | 21.26 | 163.01 | 0.40 | nan |
-| `forecast_2026-11-02.csv` | 24 | 18.75 | 12.43 | 93.69 | 0.20 | nan |
-| `forecast_2026-11-03.csv` | 24 | 16.60 | 6.02 | 16.75 | 0.99 | nan |
-| `forecast_2026-11-04.csv` | 24 | 15.31 | 13.02 | 54.30 | 0.28 | nan |
-| `forecast_2026-11-05.csv` | 24 | 37.02 | 18.49 | 14.01 | 2.64 | nan |
-| `forecast_2026-11-07.csv` | 24 | 16.96 | 17.62 | 20.95 | 0.81 | nan |
-| `forecast_2026-11-08.csv` | 24 | 82.04 | 62.83 | 99.37 | 0.83 | nan |
-| `forecast_2026-11-10.csv` | 24 | 100.49 | 117.60 | 60.41 | 1.66 | nan |
-| `forecast_2026-11-11.csv` | 24 | 119.75 | 46.70 | 113.90 | 1.05 | nan |
-| `forecast_2026-11-12.csv` | 24 | 31.60 | 35.98 | 62.11 | 0.51 | nan |
-| `forecast_2026-11-14.csv` | 24 | 27.72 | 66.10 | 151.15 | 0.18 | nan |
-| `forecast_2026-11-15.csv` | 24 | 22.30 | 66.10 | 151.15 | 0.15 | nan |
-| `forecast_2026-11-16.csv` | 24 | 21.39 | 66.10 | 151.15 | 0.14 | False |
-
-**Complete days: 14 | mean MAE 45.89 | mean SN24 39.97 | mean SN168 99.54 | days model beats SN168: 11/14**
-
-_rMAE < 1 means the model beat the seasonal-naive baseline that day. Short samples: no statistical claim until >= 60 complete pre-gate days._
-
-![Forecast vs actual](outputs/figures/latest_vs_actual.png)
-
-_If the vs-actual chart is missing, there is not yet enough overlap with realized prices._
+_Filled in by `scripts/run_daily_forecast.py`. Valid live days: 0 so far._
 
 <!-- DAILY_FORECAST_END -->
