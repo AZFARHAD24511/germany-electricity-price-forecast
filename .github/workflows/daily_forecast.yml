@@ -1,7 +1,8 @@
-﻿name: Daily Electricity Price Forecast
+name: Daily Electricity Price Forecast
 
 on:
   schedule:
+    # 09:00 UTC ≈ 10:00 CET (winter) / 11:00 CEST (summer) — before noon DE
     - cron: "0 9 * * *"
   workflow_dispatch: {}
 

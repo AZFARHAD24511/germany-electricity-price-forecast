@@ -1,0 +1,4 @@
+1) Right-click this zip -> Extract All (do NOT run the .bat from inside the zip).
+2) Double-click apply_update.bat
+3) Wait until it says DONE.
+Your data (data\raw), outputs and logs are not touched.
