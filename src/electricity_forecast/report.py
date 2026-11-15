@@ -68,6 +68,7 @@ def plot_ablation(abl: pd.DataFrame, out: Path) -> None:
 
 
 def plot_rolling(roll: pd.DataFrame, out: Path) -> None:
+    roll = roll.tail(90).reset_index(drop=True)  # keep the chart readable; the table uses all days
     d = pd.to_datetime(roll["date"])
     diff = roll["mae_sn24"] - roll["mae"]
     fig, (a1, a2) = plt.subplots(2, 1, figsize=(11, 6.4), sharex=True, gridspec_kw={"height_ratios": [2, 1]})
@@ -92,6 +93,11 @@ def plot_rolling(roll: pd.DataFrame, out: Path) -> None:
 # --------------------------------------------------------------------------- #
 # Markdown block
 # --------------------------------------------------------------------------- #
+def _a(n: int) -> str:
+    s = str(int(n))
+    return "an" if s[0] == "8" or s in {"11", "18"} or (len(s) == 2 and s[0] == "1" and s[1] == "8") else "a"
+
+
 def _p(v: float) -> str:
     return "<0.001" if v < 0.001 else f"{v:.3f}"
 
@@ -105,7 +111,8 @@ def results_block(abl: pd.DataFrame | None, roll: pd.DataFrame | None, stamp: st
             "### 5.1 Backtest ablation (gate-closure protocol)",
             "",
             f"Expanding-window backtest, {int(abl['n_days'].iloc[0])} test days ({int(abl['n_hours'].iloc[0])} hours) in three windows. "
-            "p-values: one-sided Diebold-Mariano test (daily losses, Harvey-Leybourne-Newbold correction) that the model beats the baseline.",
+            "p-values: one-sided Diebold-Mariano test (daily losses, Harvey-Leybourne-Newbold correction) that the model beats the baseline. "
+            "This section is refreshed whenever `scripts/run_ablation.py` is run (its three test windows are fixed: Jul-Oct 2026).",
             "",
             "| Setup | MAE | RMSE | rMAE vs SN24 | rMAE vs SN168 | p vs SN24 | Note |",
             "|-------|-----|------|--------------|---------------|-----------|------|",
@@ -187,9 +194,9 @@ def key_findings(abl: pd.DataFrame | None, roll: pd.DataFrame | None) -> str:
         if "B_gate_shift24" in a.index:
             b = a.loc["B_gate_shift24"]
             s = (f"1. **Gate-safe model beats seasonal naive.** {100 * (1 - b['rmae_vs_sn24']):.0f} % lower MAE than SN24 "
-                 f"in a {int(b['n_days'])}-day backtest")
+                 f"in {_a(b['n_days'])} {int(b['n_days'])}-day backtest")
             if roll is not None and len(roll):
-                s += f" and {100 * (1 - roll['mae'].mean() / roll['mae_sn24'].mean()):.0f} % in a {len(roll)}-day retrospective rolling check"
+                s += f" and {100 * (1 - roll['mae'].mean() / roll['mae_sn24'].mean()):.0f} % in {_a(len(roll))} {len(roll)}-day retrospective rolling check"
             out.append(s + " (section 5).")
         if {"A_legacy_shift24", "B_gate_shift24"} <= set(a.index):
             leak = a.loc["B_gate_shift24", "mae_ens"] - a.loc["A_legacy_shift24", "mae_ens"]
