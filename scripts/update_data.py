@@ -151,7 +151,6 @@ def update_smard_forecasts() -> None:
 
 
 def update_weather_open_meteo() -> None:
-    """Append hourly weather from Open-Meteo archive + forecast API."""
     print("Updating weather (Open-Meteo) ...")
     end = pd.Timestamp.now(tz="UTC").normalize()
     start_ts = last_ts(WEATHER_CSV)
@@ -257,7 +256,6 @@ def _entsoe_fetch_chunk(key: str, start: datetime, end: datetime) -> list[tuple]
 
 
 def update_load_forecast(days_back: int = 14) -> None:
-    """ENTSO-E day-ahead total load forecast (DE-LU), hourly MW."""
     print("Updating ENTSO-E load forecast ...")
     key = os.environ.get("ENTSOE_API_KEY")
     if not key:

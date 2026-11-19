@@ -1,24 +1,7 @@
 """Feature engineering with explicit, testable availability rules.
 
-Information set (gate-closure protocol)
----------------------------------------
-Day-ahead prices for delivery day D are fixed at ~12:00 CET on D-1.
-At that moment the *only* price information available is: every price up to
-and including the last hour of day D-1 (those were published ~12:45 on D-2).
-
-Therefore, for a target hour ``ts`` on local day D:
-
-* same-hour price lags use lag >= 24 h  -> always inside D-1 or earlier
-* "rolling" context is computed from COMPLETE local days up to D-1
-  (never from the hours of D that precede ``ts``)
-
-``price_info="legacy"`` reproduces the original ``shift(1).rolling(...)``
-features. They use price(ts-1), which is NOT known when bids are placed.
-Legacy mode exists only to quantify how much that leak flattered the backtest.
-
 ENTSO-E day-ahead load forecast is treated as available for the target hour
-(no 24h shift): it is published for use in the day-ahead market.
-SMARD wind/solar stay under external_shift (default 24h, conservative).
+(no 24h shift). SMARD wind/solar stay under external_shift (default 24h).
 """
 
 from __future__ import annotations

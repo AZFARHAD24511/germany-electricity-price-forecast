@@ -55,12 +55,14 @@ def load_load_forecast(path: Path | str) -> pd.DataFrame:
     out = df.set_index("ts").sort_index()[["load_forecast_mw"]].astype(float)
     return out
 
+
 def join_all(
     price_path: Path | str,
     smard_path: Path | str,
     weather_path: Path | str,
     load_path: Path | str | None = None,
-    ffill_limit: int = 48,) -> pd.DataFrame:
+    ffill_limit: int = 48,
+) -> pd.DataFrame:
     """Join price, SMARD, weather, and optional load forecast on UTC timestamp."""
     price = load_price_series(price_path).to_frame("price_eur_mwh")
     smard = load_smard_forecasts(smard_path)
@@ -68,9 +70,9 @@ def join_all(
     parts = [price, smard, weather]
     if load_path is not None and Path(load_path).exists():
         parts.append(load_load_forecast(load_path))
-        # outer so a short load history does not kill the whole series
-        df = pd.concat(parts, axis=1, join="outer").sort_index()
-        # keep rows that at least have price
-        df = df.loc[df["price_eur_mwh"].notna()]
-        df = df.ffill(limit=ffill_limit)
+    # outer so a short load history does not kill the whole series
+    df = pd.concat(parts, axis=1, join="outer").sort_index()
+    # keep rows that at least have price
+    df = df.loc[df["price_eur_mwh"].notna()]
+    df = df.ffill(limit=ffill_limit)
     return df

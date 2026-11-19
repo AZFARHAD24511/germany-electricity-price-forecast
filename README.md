@@ -179,7 +179,7 @@ Code: MIT. Market data remain under their original terms. SMARD-related series: 
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-19 18:28  
+**Generated (UTC):** 2026-11-19 19:08  
 **Based on data up to (UTC):** 2026-11-19 22:00  
 **Forecast horizon (UTC):** 2026-11-19 23:00 to 2026-11-20 22:00  
 **Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + ENTSO-E load (no shift) + direct 24h + shrunk hourly bias correction
@@ -210,12 +210,12 @@ Code: MIT. Market data remain under their original terms. SMARD-related series: 
 | 2026-11-20 14:00 | 206.69 | 0.00 |
 | 2026-11-20 15:00 | 215.56 | 0.00 |
 | 2026-11-20 16:00 | 220.36 | 0.00 |
-| 2026-11-20 17:00 | 218.40 | 0.00 |
-| 2026-11-20 18:00 | 216.81 | 0.00 |
-| 2026-11-20 19:00 | 208.48 | 0.00 |
-| 2026-11-20 20:00 | 196.34 | 0.00 |
-| 2026-11-20 21:00 | 190.33 | 0.00 |
-| 2026-11-20 22:00 | 184.09 | 0.00 |
+| 2026-11-20 17:00 | 218.39 | 0.00 |
+| 2026-11-20 18:00 | 216.85 | 0.00 |
+| 2026-11-20 19:00 | 208.50 | 0.00 |
+| 2026-11-20 20:00 | 196.33 | 0.00 |
+| 2026-11-20 21:00 | 190.31 | 0.00 |
+| 2026-11-20 22:00 | 184.11 | 0.00 |
 
 ### Previous forecasts vs realized prices
 
