@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Fetch only new rows from SMARD + Open-Meteo weather and append to CSVs."""
+"""Fetch only new rows from SMARD + Open-Meteo weather + ENTSO-E load and append to CSVs."""
 
 from __future__ import annotations
 
+import os
 import time
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -16,10 +19,11 @@ RAW.mkdir(parents=True, exist_ok=True)
 PRICE_CSV = RAW / "germany_electricity_hourly.csv"
 SMARD_CSV = RAW / "germany_smard_day_ahead_forecasts.csv"
 WEATHER_CSV = RAW / "germany_weather_forecast_archive.csv"
+LOAD_CSV = RAW / "germany_load_forecast.csv"
 
 BASE = "https://www.smard.de/app/chart_data"
 SESSION = requests.Session()
-SESSION.headers.update({"User-Agent": "germany-electricity-forecast/1.1"})
+SESSION.headers.update({"User-Agent": "germany-electricity-forecast/1.2"})
 
 PRICE_FILTER = "4169"
 SMARD_FILTERS = {
@@ -29,13 +33,16 @@ SMARD_FILTERS = {
     "125": "forecast_solar",
 }
 
-# DE regional points (N/E/S/W)
 WEATHER_POINTS = {
     "north": (53.55, 10.00),
     "east": (52.52, 13.40),
     "south": (48.14, 11.58),
     "west": (50.94, 6.96),
 }
+
+ENTSOE_URL = "https://web-api.tp.entsoe.eu/api"
+ENTSOE_AREA = "10Y1001A1001A83F"
+ENTSOE_NS = {"ns": "urn:iec62325.351:tc57wg16:451-6:generationloaddocument:3:0"}
 
 
 def last_ts(path: Path, col: str = "timestamp_utc") -> pd.Timestamp | None:
@@ -144,12 +151,15 @@ def update_smard_forecasts() -> None:
 
 
 def update_weather_open_meteo() -> None:
-    """Append hourly weather from Open-Meteo archive API (free, no key)."""
+    """Append hourly weather from Open-Meteo archive + forecast API."""
     print("Updating weather (Open-Meteo) ...")
     end = pd.Timestamp.now(tz="UTC").normalize()
     start_ts = last_ts(WEATHER_CSV)
-    # re-fetch last 2 days to fill gaps / revisions
-    start = (start_ts - pd.Timedelta(days=2)).normalize() if start_ts is not None else end - pd.Timedelta(days=40)
+    start = (
+        (start_ts - pd.Timedelta(days=2)).normalize()
+        if start_ts is not None
+        else end - pd.Timedelta(days=40)
+    )
 
     if start > end:
         print("  weather already up to date")
@@ -161,7 +171,6 @@ def update_weather_open_meteo() -> None:
 
     pieces = []
     for region, (lat, lon) in WEATHER_POINTS.items():
-        # archive for past days
         url = (
             "https://archive-api.open-meteo.com/v1/archive"
             f"?latitude={lat}&longitude={lon}"
@@ -187,7 +196,6 @@ def update_weather_open_meteo() -> None:
         except Exception as exc:
             print(f"  weather warn {region}: {exc}")
 
-    # also try forecast API for the next ~2 days (keeps recent hours fresher)
     for region, (lat, lon) in WEATHER_POINTS.items():
         url = (
             "https://api.open-meteo.com/v1/forecast"
@@ -221,6 +229,76 @@ def update_weather_open_meteo() -> None:
     append_csv(WEATHER_CSV, new)
 
 
+def _entsoe_fetch_chunk(key: str, start: datetime, end: datetime) -> list[tuple]:
+    params = {
+        "securityToken": key,
+        "documentType": "A65",
+        "processType": "A01",
+        "outBiddingZone_Domain": ENTSOE_AREA,
+        "periodStart": start.strftime("%Y%m%d%H%M"),
+        "periodEnd": end.strftime("%Y%m%d%H%M"),
+    }
+    r = SESSION.get(ENTSOE_URL, params=params, timeout=90)
+    r.raise_for_status()
+    root = ET.fromstring(r.content)
+    rows: list[tuple] = []
+    for ts in root.findall("ns:TimeSeries", ENTSOE_NS):
+        for period in ts.findall("ns:Period", ENTSOE_NS):
+            start_txt = period.find("ns:timeInterval/ns:start", ENTSOE_NS).text
+            t0 = datetime.fromisoformat(start_txt.replace("Z", "+00:00"))
+            res = period.find("ns:resolution", ENTSOE_NS).text
+            step = 15 if res == "PT15M" else 60
+            for point in period.findall("ns:Point", ENTSOE_NS):
+                pos = int(point.find("ns:position", ENTSOE_NS).text)
+                qty = float(point.find("ns:quantity", ENTSOE_NS).text)
+                ts_utc = t0 + timedelta(minutes=step * (pos - 1))
+                rows.append((ts_utc, qty))
+    return rows
+
+
+def update_load_forecast(days_back: int = 14) -> None:
+    """ENTSO-E day-ahead total load forecast (DE-LU), hourly MW."""
+    print("Updating ENTSO-E load forecast ...")
+    key = os.environ.get("ENTSOE_API_KEY")
+    if not key:
+        print("  skip load forecast: ENTSOE_API_KEY not set")
+        return
+
+    end = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
+    start_ts = last_ts(LOAD_CSV)
+    if start_ts is not None:
+        start = (start_ts.to_pydatetime() - timedelta(days=2)).replace(tzinfo=timezone.utc)
+    else:
+        start = end - timedelta(days=days_back)
+
+    all_rows: list[tuple] = []
+    cur = start
+    while cur < end:
+        nxt = min(cur + timedelta(days=7), end)
+        try:
+            all_rows.extend(_entsoe_fetch_chunk(key, cur, nxt))
+        except Exception as exc:
+            print(f"  load chunk error {cur.date()}->{nxt.date()}: {exc}")
+        time.sleep(0.8)
+        cur = nxt
+
+    if not all_rows:
+        print("  no new load rows")
+        return
+
+    new = pd.DataFrame(all_rows, columns=["timestamp_utc", "load_forecast_mw"])
+    new["timestamp_utc"] = pd.to_datetime(new["timestamp_utc"], utc=True)
+    new = (
+        new.drop_duplicates("timestamp_utc")
+        .set_index("timestamp_utc")
+        .resample("h")
+        .mean()
+        .dropna()
+        .reset_index()
+    )
+    append_csv(LOAD_CSV, new)
+
+
 def main() -> None:
     print("START update_data", pd.Timestamp.now(tz="UTC"))
     try:
@@ -235,6 +313,10 @@ def main() -> None:
         update_weather_open_meteo()
     except Exception as exc:
         print("WEATHER ERROR:", exc)
+    try:
+        update_load_forecast(days_back=14)
+    except Exception as exc:
+        print("LOAD ERROR:", exc)
     print("DONE update_data")
 
 

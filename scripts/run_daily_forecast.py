@@ -31,6 +31,7 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 PRICE = RAW / "germany_electricity_hourly.csv"
 SMARD = RAW / "germany_smard_day_ahead_forecasts.csv"
 WEATHER = RAW / "germany_weather_forecast_archive.csv"
+LOAD = RAW / "germany_load_forecast.csv"
 README = ROOT / "README.md"
 MARKER_START = "<!-- DAILY_FORECAST_START -->"
 MARKER_END = "<!-- DAILY_FORECAST_END -->"
@@ -52,7 +53,7 @@ def update_data() -> None:
 
 def print_data_ranges() -> None:
     print("\n--- DATA RANGES AFTER UPDATE ---")
-    for label, path in [("price", PRICE), ("smard", SMARD), ("weather", WEATHER)]:
+    for label, path in [("price", PRICE), ("smard", SMARD), ("weather", WEATHER), ("load", LOAD)]:
         if not path.exists():
             print(label, "MISSING")
             continue
@@ -96,9 +97,14 @@ def load_frame() -> pd.DataFrame:
     else:
         weather = pd.DataFrame(columns=["avg_wind", "avg_temp", "avg_rad"])
 
-    df = price.join(sm, how="left").join(weather, how="left")
-    # Short fill only. A long fill (was 48 h) silently hid a stale weather file;
-    # remaining gaps are counted in `rows_with_imputed_features` instead.
+    if LOAD.exists():
+        ld = pd.read_csv(LOAD)
+        ld["ts"] = pd.to_datetime(ld["timestamp_utc"], utc=True)
+        load = ld.set_index("ts").sort_index()[["load_forecast_mw"]].astype(float)
+    else:
+        load = pd.DataFrame(columns=["load_forecast_mw"])
+
+    df = price.join(sm, how="left").join(weather, how="left").join(load, how="left")
     df = df.ffill(limit=6)
     return df.dropna(subset=["price_eur_mwh"])
 
@@ -123,12 +129,11 @@ def plot_forecast(forecast: pd.DataFrame, path: Path) -> None:
 
 
 def score_past(price_csv: Path) -> pd.DataFrame:
-    """Score every forecast file; add SN24/SN168 baselines and relative MAE."""
     p = pd.read_csv(price_csv)
     p["ts"] = pd.to_datetime(p["timestamp_utc"], utc=True)
     price = p.set_index("ts")["price_eur_mwh"].astype(float)
     rows = []
-    latest = None  # most recent fully scored day (NOT the best one: no cherry-picking)
+    latest = None
 
     for fpath in sorted(OUT_DIR.glob("forecast_*.csv")):
         fc = pd.read_csv(fpath)
@@ -143,8 +148,16 @@ def score_past(price_csv: Path) -> pd.DataFrame:
             fc["timestamp_utc"] = pd.to_datetime(fc["timestamp_utc"], utc=True)
             fc = fc.set_index("timestamp_utc")
             common = fc.index.intersection(price.index)
-            latest = (fpath.name, r["mae"],
-                      pd.DataFrame({"actual": price.loc[common], "forecast": fc.loc[common, "yhat_eur_mwh"]}).sort_index())
+            latest = (
+                fpath.name,
+                r["mae"],
+                pd.DataFrame(
+                    {
+                        "actual": price.loc[common],
+                        "forecast": fc.loc[common, "yhat_eur_mwh"],
+                    }
+                ).sort_index(),
+            )
 
     if latest is not None:
         name, m, detail = latest
@@ -160,14 +173,25 @@ def score_past(price_csv: Path) -> pd.DataFrame:
         fig.tight_layout()
         fig.savefig(FIG_DIR / "latest_vs_actual.png", dpi=140, bbox_inches="tight")
         plt.close(fig)
-    cols = ["forecast_file", "n_hours_scored", "complete_day", "pre_gate", "delivery_start_utc", "mae", "rmse",
-            "mae_sn24", "mae_sn168", "rmae_sn24", "rmae_sn168"]
+
+    cols = [
+        "forecast_file",
+        "n_hours_scored",
+        "complete_day",
+        "pre_gate",
+        "delivery_start_utc",
+        "mae",
+        "rmse",
+        "mae_sn24",
+        "mae_sn168",
+        "rmae_sn24",
+        "rmae_sn168",
+    ]
     if rows and any("mae_raw" in r for r in rows):
         cols.insert(6, "mae_raw")
     if not rows:
         return pd.DataFrame()
     out = pd.DataFrame(rows).reindex(columns=cols)
-    # Several files scoring the SAME delivery hours are versions of one day, not extra days.
     out["pre_gate_ok"] = out["pre_gate"].map(lambda v: v is True or v == True)  # noqa: E712
     out = out.sort_values(["delivery_start_utc", "pre_gate_ok", "forecast_file"])
     out["duplicate_delivery"] = out.duplicated("delivery_start_utc", keep="last")
@@ -214,7 +238,9 @@ def score_table_md(score: pd.DataFrame) -> str:
     ok = score[score["counted"]]
     lines.append("")
     if len(ok) == 0:
-        lines.append("**Valid scored days (complete, pre-gate, unique delivery day): 0 - no performance claim possible yet.**")
+        lines.append(
+            "**Valid scored days (complete, pre-gate, unique delivery day): 0 - no performance claim possible yet.**"
+        )
     else:
         best = ok[["mae_sn24", "mae_sn168"]].min(axis=1)
         lines += [
@@ -224,9 +250,12 @@ def score_table_md(score: pd.DataFrame) -> str:
             f"**Days model beats SN24: {(ok['mae'] < ok['mae_sn24']).sum()}/{len(ok)} | "
             f"beats the better of SN24/SN168: {(ok['mae'] < best).sum()}/{len(ok)}**",
         ]
-    lines += ["", "_Only rows marked 'Counted = yes' enter the summary. Files from the old code (Pre-gate nan), "
-              "post-gate runs and duplicate delivery days are shown for transparency but not counted. "
-              "No statistical claim until >= 60 valid days._"]
+    lines += [
+        "",
+        "_Only rows marked 'Counted = yes' enter the summary. Files from the old code (Pre-gate nan), "
+        "post-gate runs and duplicate delivery days are shown for transparency but not counted. "
+        "No statistical claim until >= 60 valid days._",
+    ]
     return "\n".join(lines)
 
 
@@ -241,7 +270,7 @@ def update_readme(forecast: pd.DataFrame, score: pd.DataFrame, now: pd.Timestamp
 **Generated (UTC):** {now.strftime('%Y-%m-%d %H:%M')}  
 **Based on data up to (UTC):** {basis.strftime('%Y-%m-%d %H:%M')}  
 **Forecast horizon (UTC):** {f0.strftime('%Y-%m-%d %H:%M')} to {f1.strftime('%Y-%m-%d %H:%M')}  
-**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + direct 24h + shrunk hourly bias correction
+**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + ENTSO-E load (no shift) + direct 24h + shrunk hourly bias correction
 
 ### Forecast chart
 
@@ -283,12 +312,22 @@ def main() -> None:
 
     df = load_frame()
     print(f"Joined rows={len(df)} last={df.index.max()}")
+    if "load_forecast_mw" in df.columns:
+        n_load = int(df["load_forecast_mw"].notna().sum())
+        print(f"load_forecast_mw non-null: {n_load}")
 
     forecast = direct_forecast(df, now, target_date=args.target_date, external_shift=24)
     tgt = forecast["target_date"].iloc[0]
-    print("Target delivery day:", tgt, "| pre_gate:", bool(forecast["pre_gate"].iloc[0]),
-          "| data_gap_hours:", forecast["data_gap_hours"].iloc[0],
-          "| rows with imputed features:", forecast["rows_with_imputed_features"].iloc[0])
+    print(
+        "Target delivery day:",
+        tgt,
+        "| pre_gate:",
+        bool(forecast["pre_gate"].iloc[0]),
+        "| data_gap_hours:",
+        forecast["data_gap_hours"].iloc[0],
+        "| rows with imputed features:",
+        forecast["rows_with_imputed_features"].iloc[0],
+    )
     if forecast["data_gap_hours"].iloc[0] > 48:
         print("WARNING: price history ends >48 h before the delivery day; forecast quality is not comparable.")
 

@@ -15,6 +15,10 @@ Therefore, for a target hour ``ts`` on local day D:
 ``price_info="legacy"`` reproduces the original ``shift(1).rolling(...)``
 features. They use price(ts-1), which is NOT known when bids are placed.
 Legacy mode exists only to quantify how much that leak flattered the backtest.
+
+ENTSO-E day-ahead load forecast is treated as available for the target hour
+(no 24h shift): it is published for use in the day-ahead market.
+SMARD wind/solar stay under external_shift (default 24h, conservative).
 """
 
 from __future__ import annotations
@@ -33,6 +37,7 @@ SMARD_COLS = [
     "forecast_solar",
 ]
 WEATHER_COLS = ["avg_wind", "avg_temp", "avg_rad"]
+LOAD_COLS = ["load_forecast_mw"]
 EXTERNAL_COLS = SMARD_COLS + WEATHER_COLS
 
 CONTEXT_COLS = [
@@ -47,11 +52,7 @@ CONTEXT_COLS = [
 LEGACY_ROLL_COLS = ["roll_mean_24", "roll_std_24", "roll_mean_168", "roll_std_168"]
 
 
-# --------------------------------------------------------------------------- #
-# Calendar
-# --------------------------------------------------------------------------- #
 def _easter_sunday(year: int) -> date:
-    """Anonymous Gregorian algorithm for Easter Sunday."""
     a = year % 19
     b = year // 100
     c = year % 100
@@ -70,7 +71,6 @@ def _easter_sunday(year: int) -> date:
 
 
 def german_public_holidays(year: int) -> set[date]:
-    """Federal (bundesweit) public holidays in Germany."""
     easter = _easter_sunday(year)
     return {
         date(year, 1, 1),
@@ -94,12 +94,10 @@ def _holiday_set_for_index(index: pd.DatetimeIndex) -> set[date]:
 
 
 def local_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
-    """Europe/Berlin calendar date (naive midnight) for each UTC timestamp."""
     return index.tz_convert(LOCAL_TZ).tz_localize(None).normalize()
 
 
 def delivery_day_utc_index(target_date: date | str | pd.Timestamp) -> pd.DatetimeIndex:
-    """All UTC hours of the Europe/Berlin delivery day (23, 24 or 25 hours)."""
     d = pd.Timestamp(target_date).tz_localize(None).normalize()
     start = d.tz_localize(LOCAL_TZ)
     end = (d + pd.Timedelta(days=1)).tz_localize(LOCAL_TZ)
@@ -107,7 +105,6 @@ def delivery_day_utc_index(target_date: date | str | pd.Timestamp) -> pd.Datetim
 
 
 def gate_closure_utc(target_date: date | str | pd.Timestamp) -> pd.Timestamp:
-    """12:00 Europe/Berlin on D-1 (EPEX SDAC gate closure), as UTC."""
     d = pd.Timestamp(target_date).tz_localize(None).normalize() - pd.Timedelta(days=1)
     return (d + pd.Timedelta(hours=12)).tz_localize(LOCAL_TZ).tz_convert("UTC")
 
@@ -136,15 +133,7 @@ def _calendar_block(index: pd.DatetimeIndex) -> pd.DataFrame:
     return X
 
 
-# --------------------------------------------------------------------------- #
-# Price context (gate-safe)
-# --------------------------------------------------------------------------- #
 def daily_context(s: pd.Series, min_hours: int = 20) -> pd.DataFrame:
-    """
-    Per local-day summary available at the END of that day.
-    Indexed by naive local date. Incomplete days (< min_hours) become NaN so a
-    partially downloaded day can never masquerade as a full one.
-    """
     ld = local_dates(s.index)
     g = s.groupby(ld)
     cnt = g.count()
@@ -158,8 +147,6 @@ def daily_context(s: pd.Series, min_hours: int = 20) -> pd.DataFrame:
         }
     )
     out.loc[cnt < min_hours, :] = np.nan
-
-    # 7-day hourly mean/std over the 168 h ending at the last hour of each day
     r_mean = s.rolling(168, min_periods=84).mean()
     r_std = s.rolling(168, min_periods=84).std()
     out["ctx_mean_7d"] = r_mean.groupby(ld).last()
@@ -176,9 +163,6 @@ def _gate_context_for_index(s: pd.Series, index: pd.DatetimeIndex) -> pd.DataFra
     return vals
 
 
-# --------------------------------------------------------------------------- #
-# Main builders
-# --------------------------------------------------------------------------- #
 def _build(
     df: pd.DataFrame,
     external_shift: int,
@@ -199,7 +183,7 @@ def _build(
 
     if price_info == "gate":
         X = X.join(_gate_context_for_index(s, df.index))
-    else:  # legacy: uses price(ts-1) -> NOT available at gate closure
+    else:
         X["roll_mean_24"] = s.shift(1).rolling(24, min_periods=12).mean()
         X["roll_std_24"] = s.shift(1).rolling(24, min_periods=12).std()
         X["roll_mean_168"] = s.shift(1).rolling(168, min_periods=84).mean()
@@ -211,6 +195,10 @@ def _build(
     for c in WEATHER_COLS:
         if c in df.columns:
             X[c] = df[c].shift(weather_shift)
+    # Day-ahead load forecast: available for target hour (no conservative shift)
+    for c in LOAD_COLS:
+        if c in df.columns:
+            X[c] = df[c]
     return X
 
 
@@ -221,15 +209,6 @@ def make_features(
     price_info: str = "gate",
     weather_shift: int | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
-    """
-    Training / backtest feature matrix and target (rows with full features only).
-
-    external_shift : hours to lag SMARD wind/solar forecasts (24 = conservative)
-    weather_shift  : hours to lag *observed/reanalysis* weather columns. Observed
-                     weather of the afternoon of D-1 is not known at 12:00 D-1;
-                     strict availability needs 36 h. Defaults to external_shift.
-    price_info     : "gate" (default, leak-free) or "legacy" (old behaviour)
-    """
     df = regularize_hourly(df)
     X = _build(df, external_shift, price_col, price_info, weather_shift)
     y = df[price_col]
@@ -245,22 +224,12 @@ def make_target_features(
     weather_shift: int | None = None,
     feature_cols: list[str] | None = None,
 ) -> pd.DataFrame:
-    """
-    Feature rows for every hour of delivery day ``target_date`` (Europe/Berlin).
-
-    Anything at or after the start of the delivery day is dropped from ``df``
-    before building features, so the target day's real prices can never leak in
-    (even if they were already downloaded). The horizon is defined by the
-    delivery date, not by "last row in the file", so a stale weather/SMARD file
-    can no longer shift the forecast into the past.
-    """
     tgt_idx = delivery_day_utc_index(target_date)
     hist = df.loc[df.index < tgt_idx[0]].copy()
     if hist.empty:
         raise ValueError("No history before target date")
     ext = hist.reindex(hist.index.union(tgt_idx)).sort_index()
     ext.index.name = hist.index.name
-    # hourly grid so shift(k) means k *hours* even if the file has holes
     full = pd.date_range(ext.index.min(), ext.index.max(), freq="h", tz="UTC")
     ext = ext.reindex(full)
     X = _build(ext, external_shift, price_col, "gate", weather_shift).loc[tgt_idx]
@@ -270,6 +239,5 @@ def make_target_features(
 
 
 def regularize_hourly(df: pd.DataFrame) -> pd.DataFrame:
-    """Reindex to a complete hourly UTC grid so shift(k) always equals k hours."""
     full = pd.date_range(df.index.min(), df.index.max(), freq="h", tz="UTC")
     return df[~df.index.duplicated(keep="last")].sort_index().reindex(full)
