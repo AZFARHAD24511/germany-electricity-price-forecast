@@ -179,10 +179,10 @@ Code: MIT. Market data remain under their original terms. SMARD-related series: 
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-18 09:58  
-**Based on data up to (UTC):** 2026-11-18 22:00  
-**Forecast horizon (UTC):** 2026-11-18 23:00 to 2026-11-19 22:00  
-**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + direct 24h + shrunk hourly bias correction
+**Generated (UTC):** 2026-11-19 11:24  
+**Based on data up to (UTC):** 2026-11-19 22:00  
+**Forecast horizon (UTC):** 2026-11-19 23:00 to 2026-11-20 22:00  
+**Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + ENTSO-E load (no shift) + direct 24h + shrunk hourly bias correction
 
 ### Forecast chart
 
@@ -192,30 +192,30 @@ Code: MIT. Market data remain under their original terms. SMARD-related series: 
 
 | Hour (UTC) | Forecast (EUR/MWh) | Bias |
 |------------|--------------------|------|
-| 2026-11-18 23:00 | 165.52 | 0.00 |
-| 2026-11-19 00:00 | 155.13 | 0.00 |
-| 2026-11-19 01:00 | 149.64 | 0.00 |
-| 2026-11-19 02:00 | 146.60 | 0.00 |
-| 2026-11-19 03:00 | 148.19 | 0.00 |
-| 2026-11-19 04:00 | 159.90 | 0.00 |
-| 2026-11-19 05:00 | 186.38 | 0.00 |
-| 2026-11-19 06:00 | 204.73 | 0.00 |
-| 2026-11-19 07:00 | 213.27 | 0.00 |
-| 2026-11-19 08:00 | 197.73 | 0.00 |
-| 2026-11-19 09:00 | 190.35 | 0.00 |
-| 2026-11-19 10:00 | 177.51 | 0.00 |
-| 2026-11-19 11:00 | 174.23 | 0.00 |
-| 2026-11-19 12:00 | 172.15 | 0.00 |
-| 2026-11-19 13:00 | 181.34 | 0.00 |
-| 2026-11-19 14:00 | 201.55 | 0.00 |
-| 2026-11-19 15:00 | 227.07 | 0.00 |
-| 2026-11-19 16:00 | 228.37 | 0.00 |
-| 2026-11-19 17:00 | 217.09 | 0.00 |
-| 2026-11-19 18:00 | 208.63 | 0.00 |
-| 2026-11-19 19:00 | 200.60 | 0.00 |
-| 2026-11-19 20:00 | 179.32 | 0.00 |
-| 2026-11-19 21:00 | 178.83 | 0.00 |
-| 2026-11-19 22:00 | 164.42 | 0.00 |
+| 2026-11-19 23:00 | 183.85 | 0.00 |
+| 2026-11-20 00:00 | 177.77 | 0.00 |
+| 2026-11-20 01:00 | 179.49 | 0.00 |
+| 2026-11-20 02:00 | 182.19 | 0.00 |
+| 2026-11-20 03:00 | 181.77 | 0.00 |
+| 2026-11-20 04:00 | 183.01 | 0.00 |
+| 2026-11-20 05:00 | 196.35 | 0.00 |
+| 2026-11-20 06:00 | 208.36 | 0.00 |
+| 2026-11-20 07:00 | 220.12 | 0.00 |
+| 2026-11-20 08:00 | 202.02 | 0.00 |
+| 2026-11-20 09:00 | 198.52 | 0.00 |
+| 2026-11-20 10:00 | 189.74 | 0.00 |
+| 2026-11-20 11:00 | 183.70 | 0.00 |
+| 2026-11-20 12:00 | 184.63 | 0.00 |
+| 2026-11-20 13:00 | 195.96 | 0.00 |
+| 2026-11-20 14:00 | 205.73 | 0.00 |
+| 2026-11-20 15:00 | 214.92 | 0.00 |
+| 2026-11-20 16:00 | 219.63 | 0.00 |
+| 2026-11-20 17:00 | 215.21 | 0.00 |
+| 2026-11-20 18:00 | 214.25 | 0.00 |
+| 2026-11-20 19:00 | 205.62 | 0.00 |
+| 2026-11-20 20:00 | 192.45 | 0.00 |
+| 2026-11-20 21:00 | 191.18 | 0.00 |
+| 2026-11-20 22:00 | 184.74 | 0.00 |
 
 ### Previous forecasts vs realized prices
 
@@ -224,10 +224,11 @@ Code: MIT. Market data remain under their original terms. SMARD-related series: 
 | `forecast_2026-11-16.csv` | 24 | 20.65 | 66.10 | 151.15 | 0.31 | 0.14 | False | no: not pre-gate |
 | `forecast_2026-11-17.csv` | 24 | 55.82 | 46.58 | 139.90 | 1.20 | 0.40 | True | yes |
 | `forecast_2026-11-18.csv` | 24 | 51.79 | 72.19 | 170.40 | 0.72 | 0.30 | True | yes |
+| `forecast_2026-11-19.csv` | 24 | 40.31 | 78.58 | 36.01 | 0.51 | 1.12 | True | yes |
 
-**Valid scored days: 2 | mean MAE model 53.80 | SN24 59.38 | SN168 155.15 | best-of-baselines 59.38**
+**Valid scored days: 3 | mean MAE model 49.31 | SN24 65.78 | SN168 115.44 | best-of-baselines 51.59**
 
-**Days model beats SN24: 1/2 | beats the better of SN24/SN168: 1/2**
+**Days model beats SN24: 2/3 | beats the better of SN24/SN168: 1/3**
 
 _Only rows marked 'Counted = yes' enter the summary. Files from the old code (Pre-gate nan), post-gate runs and duplicate delivery days are shown for transparency but not counted. No statistical claim until >= 60 valid days._
 
