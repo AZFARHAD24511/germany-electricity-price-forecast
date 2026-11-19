@@ -179,7 +179,7 @@ Code: MIT. Market data remain under their original terms. SMARD-related series: 
 
 ## Live daily forecast
 
-**Generated (UTC):** 2026-11-19 11:24  
+**Generated (UTC):** 2026-11-19 11:34  
 **Based on data up to (UTC):** 2026-11-19 22:00  
 **Forecast horizon (UTC):** 2026-11-19 23:00 to 2026-11-20 22:00  
 **Protocol:** gate-closure features (lags >= 24 h, complete-day context) + external_shift = 24 + ENTSO-E load (no shift) + direct 24h + shrunk hourly bias correction
